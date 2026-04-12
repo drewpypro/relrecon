@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+benchmarks/results/*
+!benchmarks/results/summary_snapshot.md
+tests/results/*
+reviews/
+output/

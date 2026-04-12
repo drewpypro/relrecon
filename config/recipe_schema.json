@@ -1,0 +1,244 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Relational Matching Recipe Schema",
+  "description": "JSON Schema for validating recipe YAML configs. Usable for linting in CI/automated workflows.",
+  "type": "object",
+  "required": ["name", "sources", "populations", "steps", "output"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Human-readable recipe name"
+    },
+    "description": {
+      "type": "string"
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["file", "type"],
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Path to data file (CSV, Parquet, or any Polars-supported format)"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["trusted_reference", "multi_population"]
+          }
+        }
+      }
+    },
+    "populations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["source"],
+        "properties": {
+          "source": { "type": "string" },
+          "filter": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["field", "op"],
+              "properties": {
+                "field": { "type": "string" },
+                "op": {
+                  "type": "string",
+                  "enum": ["eq", "neq", "starts_with", "not_starts_with", "contains", "contains_any"]
+                },
+                "value": { "type": "string" },
+                "values": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "join": {
+                  "type": "string",
+                  "enum": ["and", "or"],
+                  "default": "and"
+                }
+              }
+            }
+          },
+          "action": {
+            "type": "string",
+            "enum": ["exclude"]
+          },
+          "invalid_fields": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "source", "destination", "match_fields"],
+        "properties": {
+          "name": { "type": "string" },
+          "source": { "type": "string" },
+          "destination": { "type": "string" },
+          "match_fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["source", "destination", "method", "tiers"],
+              "properties": {
+                "source": { "type": "string" },
+                "destination": { "type": "string" },
+                "method": {
+                  "type": "string",
+                  "enum": ["exact", "fuzzy"]
+                },
+                "tiers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["raw", "clean", "normalized"]
+                  }
+                }
+              }
+            }
+          },
+          "address_support": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "destination": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "parser": {
+                "type": "string",
+                "enum": ["auto", "libpostal", "default"],
+                "default": "auto"
+              },
+              "threshold": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            }
+          },
+          "date_gate": {
+            "type": "object",
+            "required": ["field", "max_age_years", "applies_to"],
+            "properties": {
+              "field": { "type": "string" },
+              "max_age_years": { "type": "number" },
+              "applies_to": {
+                "type": "string",
+                "enum": ["destination", "source", "both"]
+              }
+            }
+          },
+          "inherit": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["source", "as"],
+              "properties": {
+                "source": { "type": "string" },
+                "as": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": ["format", "path"],
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["xlsx", "csv", "parquet"]
+        },
+        "path": { "type": "string" },
+        "match_mode": {
+          "type": "string",
+          "enum": ["best_match", "all_matches"],
+          "default": "best_match"
+        },
+        "tabs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string" },
+              "type": {
+                "type": "string",
+                "enum": ["matched_records", "unmatched_review"]
+              }
+            }
+          }
+        },
+        "columns": {
+          "type": "object",
+          "description": "Report column definitions. When omitted, hardcoded defaults are used (backward compatible).",
+          "properties": {
+            "matched": {
+              "type": "array",
+              "description": "Columns for the Matched tab, in display order.",
+              "items": {
+                "type": "object",
+                "required": ["header"],
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "description": "Single DataFrame column name."
+                  },
+                  "fields": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Variant column names to coalesce (for dest columns from different steps)."
+                  },
+                  "header": {
+                    "type": "string",
+                    "description": "Display header in Excel."
+                  }
+                }
+              }
+            },
+            "analysis": {
+              "type": "array",
+              "description": "Columns for the Analysis tab, in display order.",
+              "items": {
+                "type": "object",
+                "required": ["field", "header"],
+                "properties": {
+                  "field": { "type": "string" },
+                  "header": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "normalization": {
+      "type": "object",
+      "properties": {
+        "stopwords": { "type": "string" },
+        "aliases": { "type": "string" },
+        "unicode": {
+          "type": "object",
+          "properties": {
+            "ranges": { "type": "string" },
+            "mode": {
+              "type": "string",
+              "enum": ["normalize", "profile_only", "skip"],
+              "default": "skip"
+            }
+          }
+        }
+      }
+    }
+  }
+}
