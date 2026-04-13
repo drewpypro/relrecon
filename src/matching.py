@@ -545,6 +545,12 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             combined = combined.sort(sort_cols, descending=sort_desc)
             combined = combined.unique(subset=[src_field], keep="first")
 
+        # Exact matches get name_score=100 (fuzzy steps already have scores)
+        if "name_score" in combined.columns:
+            combined = combined.with_columns(
+                pl.col("name_score").fill_null(100.0).alias("name_score")
+            )
+
         combined = combined.drop([c for c in combined.columns if c.startswith("_")])
     else:
         combined = pl.DataFrame()
