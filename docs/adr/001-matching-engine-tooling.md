@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Date:** 2026-04-11  
-**Author:** Bogoy (drewpy-code-agent)
+**Author:** Bogoy (drewpy-code-agent)  
 **Deciders:** Drewpypro
 
 ---
