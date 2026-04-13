@@ -236,14 +236,30 @@ def validate_fields(
         if pop_data["df"] is not None:
             all_source_cols.update(pop_data["df"].columns)
     # Known derived/metadata columns the pipeline creates
+    # Static metadata columns always present in output
     known_derived = {
-        "derived_l1_name", "derived_l1_id", "match_step", "match_tier",
-        "name_score",
+        "match_step", "match_tier", "name_score",
         "addr_score", "addr_street_match", "addr_comparison", "addr_tier",
     }
+    # Dynamically add columns from recipe inherit[].as values
+    for step in recipe.get("steps", []):
+        for inh in step.get("inherit", []):
+            if "as" in inh:
+                known_derived.add(inh["as"])
 
     for tab_key in ("matched", "analysis"):
-        for entry in output_columns.get(tab_key, []):
+        for i, entry in enumerate(output_columns.get(tab_key, [])):
+            if "field" not in entry and "fields" not in entry:
+                errors.append(
+                    f'output.columns.{tab_key}[{i}]: entry must have '
+                    f'either "field" or "fields"'
+                )
+                continue
+            if "field" in entry and "fields" in entry:
+                errors.append(
+                    f'output.columns.{tab_key}[{i}]: entry has both '
+                    f'"field" and "fields" — use one or the other'
+                )
             if "field" in entry:
                 f = entry["field"]
                 if f not in all_source_cols and f not in known_derived:
