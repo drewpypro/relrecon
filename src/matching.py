@@ -350,11 +350,16 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
     aliases = None
     stopwords = None
     if norm_cfg.get("aliases"):
-        aliases_path = Path(base_dir) / norm_cfg["aliases"] if not Path(norm_cfg["aliases"]).is_absolute() else Path(norm_cfg["aliases"])
+        aliases_path = Path(norm_cfg["aliases"]) if Path(norm_cfg["aliases"]).is_absolute() else Path(norm_cfg["aliases"])
+        # Try relative to cwd first, then relative to base_dir
+        if not aliases_path.exists():
+            aliases_path = Path(base_dir) / norm_cfg["aliases"]
         if aliases_path.exists():
             aliases = json.loads(aliases_path.read_text())
     if norm_cfg.get("stopwords"):
-        sw_path = Path(base_dir) / norm_cfg["stopwords"] if not Path(norm_cfg["stopwords"]).is_absolute() else Path(norm_cfg["stopwords"])
+        sw_path = Path(norm_cfg["stopwords"]) if Path(norm_cfg["stopwords"]).is_absolute() else Path(norm_cfg["stopwords"])
+        if not sw_path.exists():
+            sw_path = Path(base_dir) / norm_cfg["stopwords"]
         if sw_path.exists():
             sw_data = json.loads(sw_path.read_text())
             # Flatten stopwords if categorized by type (name/address)

@@ -66,7 +66,7 @@ def load_source(source_config: dict, base_dir: str = ".") -> pl.DataFrame:
     if suffix == ".parquet":
         return pl.read_parquet(str(file_path))
     elif suffix in (".csv", ".tsv"):
-        return pl.read_csv(str(file_path))
+        return pl.read_csv(str(file_path), infer_schema_length=0)
     else:
         raise ValueError(f"Unsupported format: {suffix}")
 
