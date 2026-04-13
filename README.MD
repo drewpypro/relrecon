@@ -1,4 +1,4 @@
-# Relational Matching Engine
+# Relational Reconciliation Engine
 
 A config-driven framework for reconciling datasets with broken or unreliable hierarchical relationships. Define a recipe, run the engine, get an auditable Excel report.
 
