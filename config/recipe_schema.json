@@ -202,21 +202,38 @@
               "items": {
                 "type": "object",
                 "required": ["header"],
-                "properties": {
-                  "field": {
-                    "type": "string",
-                    "description": "Single DataFrame column name."
+                "oneOf": [
+                  {
+                    "required": ["field"],
+                    "properties": {
+                      "field": {
+                        "type": "string",
+                        "description": "Single DataFrame column name."
+                      },
+                      "header": {
+                        "type": "string",
+                        "description": "Display header in Excel."
+                      }
+                    },
+                    "additionalProperties": false
                   },
-                  "fields": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Variant column names to coalesce (for dest columns from different steps)."
-                  },
-                  "header": {
-                    "type": "string",
-                    "description": "Display header in Excel."
+                  {
+                    "required": ["fields"],
+                    "properties": {
+                      "fields": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 1,
+                        "description": "Variant column names to coalesce (for dest columns from different steps)."
+                      },
+                      "header": {
+                        "type": "string",
+                        "description": "Display header in Excel."
+                      }
+                    },
+                    "additionalProperties": false
                   }
-                }
+                ]
               }
             },
             "analysis": {
