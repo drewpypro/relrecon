@@ -1,9 +1,10 @@
 # Core dependencies
-polars>=1.0
-rapidfuzz>=3.0
-openpyxl>=3.1
-pyyaml>=6.0
+polars
+rapidfuzz
+numpy
+openpyxl
+pyyaml
 
 # Optional: international address parsing (better accuracy, requires C library)
 # Install libpostal first: see docs/implementation-plan.md#libpostal-installation
-# postal>=1.1
+# postal
