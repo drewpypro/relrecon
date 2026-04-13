@@ -92,6 +92,19 @@
                   "type": "string",
                   "enum": ["exact", "fuzzy"]
                 },
+                "threshold": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "default": 80,
+                  "description": "Minimum fuzzy score (0-100) for method: fuzzy. Ignored for exact."
+                },
+                "scorer": {
+                  "type": "string",
+                  "enum": ["token_sort_ratio", "token_set_ratio", "ratio", "partial_ratio", "WRatio"],
+                  "default": "token_sort_ratio",
+                  "description": "RapidFuzz scorer function for method: fuzzy. Ignored for exact."
+                },
                 "tiers": {
                   "type": "array",
                   "items": {

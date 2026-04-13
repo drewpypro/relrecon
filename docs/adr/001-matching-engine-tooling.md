@@ -115,7 +115,7 @@ matches = process.extract(query, choices, scorer=fuzz.token_sort_ratio, score_cu
 
 **Pros:**
 - **Polars:** 5-10x faster than Pandas on filtering/joins, native multi-threading (uses all 8/16 cores), lazy evaluation optimizes query plans, lower memory footprint (Arrow-backed)
-- **RapidFuzz:** C++ compiled backend, 10-100x faster than fuzzywuzzy, same API surface, actively maintained, supports `process.extract` for batch matching
+- **RapidFuzz:** C++ compiled backend, 10-100x faster than fuzzywuzzy, same API surface, actively maintained, supports `process.cdist` for full C++ matrix computation (no Python loops) and `process.extract` for batch matching
 - **libpostal** (optional)**:** International address parser (200+ countries), splits addresses into structured components, handles abbreviations and normalization. Built-in two-pass tokenizer as zero-dependency fallback
 - **Blocking strategy:** Parse addresses → group by state/city/zip → only compare within blocks. Reduces comparisons from 15k × N to small block sizes (e.g., 50 × 5)
 - **Address token scoring:** Compare parsed components independently, weight street name highest

@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import polars as pl
 from recipe import load_recipe, load_source, filter_population, build_filter_expr, validate_recipe
-from matching import apply_date_gate, match_names_exact, run_matching_step, run_pipeline
+from matching import apply_date_gate, match_names_exact, match_names_fuzzy, run_matching_step, run_pipeline
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 RECIPE_PATH = Path(__file__).parent.parent / "config" / "recipes" / "l1_reconciliation.yaml"
@@ -35,7 +35,7 @@ def test_load_recipe():
     _results = [
         {"check": "loads", "passed": recipe is not None, "actual": type(recipe).__name__},
         {"check": "name", "passed": recipe["name"] == "L1 Reconciliation", "actual": recipe["name"]},
-        {"check": "2_steps", "passed": len(recipe["steps"]) == 2, "actual": len(recipe["steps"])},
+        {"check": "4_steps", "passed": len(recipe["steps"]) == 4, "actual": len(recipe["steps"])},
         {"check": "3_pops", "passed": len(recipe["populations"]) == 3, "actual": len(recipe["populations"])},
         {"check": "step1_src", "passed": recipe["steps"][0]["source"] == "pop1", "actual": recipe["steps"][0]["source"]},
         {"check": "step1_dst", "passed": recipe["steps"][0]["destination"] == "core_parent", "actual": recipe["steps"][0]["destination"]},
@@ -253,6 +253,99 @@ def test_no_python_loops_in_name_matching():
     ]
     for r in _results:
         assert r["passed"], f"Failed: {r}"
+
+
+# --- Fuzzy matching tests ---
+
+def test_fuzzy_basic():
+    """Fuzzy matching finds near-matches that exact misses."""
+    src = pl.DataFrame({"name": [
+        "Bapienx Solutions Inc",
+        "Orizon Analytics LLC",
+        "Exact Match Corp",
+    ]})
+    dst = pl.DataFrame({"name": [
+        "Bapienx Inc",
+        "Orizon Analytics Group",
+        "Exact Match Corp",
+    ]})
+    # Exact should only get 1
+    exact = match_names_exact(src, dst, "name", "name", tiers=["raw", "clean"])
+    assert exact.height == 1, f"Expected 1 exact match, got {exact.height}"
+
+    # Fuzzy at threshold 60 should get all 3
+    fuzzy = match_names_fuzzy(src, dst, "name", "name", tiers=["raw", "clean"], threshold=60)
+    assert fuzzy.height == 3, f"Expected 3 fuzzy matches, got {fuzzy.height}"
+    assert "name_score" in fuzzy.columns, "Missing name_score column"
+    assert "match_tier" in fuzzy.columns, "Missing match_tier column"
+
+    # Exact match should have score 100
+    exact_row = fuzzy.filter(pl.col("name") == "Exact Match Corp")
+    assert exact_row["name_score"][0] == 100.0, f"Exact match score should be 100, got {exact_row['name_score'][0]}"
+
+
+def test_fuzzy_threshold_filters():
+    """Higher threshold should produce fewer matches."""
+    src = pl.DataFrame({"name": ["Brevix Transport Inc", "Orizon Analytics LLC"]})
+    dst = pl.DataFrame({"name": ["Brevix Logistics Inc", "Orizon Analytics Group"]})
+
+    low = match_names_fuzzy(src, dst, "name", "name", tiers=["clean"], threshold=60)
+    high = match_names_fuzzy(src, dst, "name", "name", tiers=["clean"], threshold=80)
+    assert low.height >= high.height, f"Low threshold should match >= high: {low.height} vs {high.height}"
+    # Brevix (score ~65) should be filtered at 80
+    assert high.height < low.height, f"High threshold should filter Brevix: high={high.height} low={low.height}"
+
+
+def test_fuzzy_tier_priority():
+    """Earlier tier should win in dedup."""
+    src = pl.DataFrame({"name": ["Test Corp"]})
+    dst = pl.DataFrame({"name": ["Test Corp"]})
+    result = match_names_fuzzy(src, dst, "name", "name", tiers=["raw", "clean"], threshold=80)
+    assert result.height == 1
+    assert result["match_tier"][0] == "raw", f"Expected raw tier, got {result['match_tier'][0]}"
+
+
+def test_fuzzy_scorer_option():
+    """Different scorers should produce different results."""
+    src = pl.DataFrame({"name": ["Qualidyne Professional Svcs"]})
+    dst = pl.DataFrame({"name": ["Qualidyne Services"]})
+    token_sort = match_names_fuzzy(src, dst, "name", "name", tiers=["clean"], threshold=50, scorer="token_sort_ratio")
+    wratio = match_names_fuzzy(src, dst, "name", "name", tiers=["clean"], threshold=50, scorer="WRatio")
+    assert token_sort.height == 1 and wratio.height == 1
+    # Scores should differ between scorers
+    ts_score = token_sort["name_score"][0]
+    wr_score = wratio["name_score"][0]
+    assert ts_score != wr_score, f"Scores should differ: token_sort={ts_score} WRatio={wr_score}"
+
+
+def test_fuzzy_dispatch_in_step():
+    """run_matching_step dispatches to fuzzy when method=fuzzy."""
+    src = pl.DataFrame({"name": ["Bapienx Solutions Inc", "Exact Corp"]})
+    dst = pl.DataFrame({"name": ["Bapienx Inc", "Exact Corp"]})
+    step = {
+        "name": "fuzzy_step",
+        "match_fields": [{"source": "name", "destination": "name", "method": "fuzzy", "tiers": ["clean"], "threshold": 60}],
+    }
+    result = run_matching_step(src, dst, step)
+    assert result.height == 2, f"Expected 2 fuzzy matches via step, got {result.height}"
+    assert "name_score" in result.columns
+    assert "match_step" in result.columns
+
+
+def test_fuzzy_empty_source():
+    """Fuzzy matching with empty source returns empty DataFrame."""
+    src = pl.DataFrame({"name": pl.Series([], dtype=pl.String)})
+    dst = pl.DataFrame({"name": ["Something"]})
+    result = match_names_fuzzy(src, dst, "name", "name", threshold=60)
+    assert result.height == 0
+
+
+def test_fuzzy_no_matches_above_threshold():
+    """When nothing meets threshold, return empty."""
+    src = pl.DataFrame({"name": ["Completely Different Name"]})
+    dst = pl.DataFrame({"name": ["Unrelated Entity"]})
+    result = match_names_fuzzy(src, dst, "name", "name", tiers=["clean"], threshold=80)
+    assert result.height == 0
 
 
 def test_clean_column_uses_shared_normalize():

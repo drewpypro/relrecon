@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Optional
 
 import polars as pl
-from rapidfuzz import fuzz as rfuzz
+import numpy as np
+from rapidfuzz import fuzz as rfuzz, process as rprocess
 
 from normalize import clean, normalized
 from address import score_address_multi_tier
@@ -139,6 +140,113 @@ def match_names_exact(source_df: pl.DataFrame, dest_df: pl.DataFrame,
     return combined
 
 
+def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
+                      src_field: str, dst_field: str,
+                      tiers: list = None,
+                      threshold: int = 80,
+                      scorer: str = "token_sort_ratio",
+                      aliases: dict = None,
+                      stopwords: list = None) -> pl.DataFrame:
+    """Fuzzy name matching via RapidFuzz cdist (full C++ matrix, no Python loops).
+
+    For each tier, builds match-key columns (same as exact), then uses
+    RapidFuzz cdist to compute the full score matrix in C++. Extracts
+    the best match per source row above threshold.
+    Tries tiers in order; deduplicates by tier priority (earlier tier wins),
+    then by highest score within tier.
+
+    Returns matched DataFrame with name_score column (0-100).
+    """
+    if tiers is None:
+        tiers = ["raw", "clean"]
+
+    # Resolve scorer function
+    scorer_map = {
+        "token_sort_ratio": rfuzz.token_sort_ratio,
+        "token_set_ratio": rfuzz.token_set_ratio,
+        "ratio": rfuzz.ratio,
+        "partial_ratio": rfuzz.partial_ratio,
+        "WRatio": rfuzz.WRatio,
+    }
+    scorer_fn = scorer_map.get(scorer, rfuzz.token_sort_ratio)
+
+    tier_priority = {"raw": 0, "clean": 1, "normalized": 2}
+    results = []
+
+    for tier in tiers:
+        # Build match keys for this tier (same logic as exact)
+        if tier == "raw":
+            src = source_df.with_columns(pl.col(src_field).cast(pl.String).alias("_match_key"))
+            dst = dest_df.with_columns(pl.col(dst_field).cast(pl.String).alias("_match_key"))
+        elif tier == "normalized":
+            src = _normalized_column(source_df, src_field, "_match_key", aliases, stopwords)
+            dst = _normalized_column(dest_df, dst_field, "_match_key", aliases, stopwords)
+        else:  # clean
+            src = _clean_column(source_df, src_field, "_match_key")
+            dst = _clean_column(dest_df, dst_field, "_match_key")
+
+        # Build key lists for cdist
+        src_keys = [str(k) if k is not None else "" for k in src["_match_key"].to_list()]
+        dst_keys = [str(k) if k is not None else "" for k in dst["_match_key"].to_list()]
+        if not dst_keys or not src_keys:
+            continue
+
+        # Compute full score matrix in C++ (no Python loops)
+        # workers=-1 uses all available cores
+        score_matrix = rprocess.cdist(
+            src_keys, dst_keys,
+            scorer=scorer_fn, score_cutoff=threshold,
+            dtype=np.float32, workers=-1,
+        )
+
+        # Extract best match per source row
+        best_dst_idxs = score_matrix.argmax(axis=1)
+        best_scores = score_matrix[np.arange(len(src_keys)), best_dst_idxs]
+
+        # Filter to rows that met the threshold (cdist sets below-threshold to 0)
+        mask = best_scores >= threshold
+        if not mask.any():
+            continue
+
+        src_idxs = np.where(mask)[0].tolist()
+        dst_idxs = best_dst_idxs[mask].tolist()
+        scores = best_scores[mask].tolist()
+
+        matched_src = src[src_idxs].drop("_match_key")
+        matched_dst = dst[dst_idxs].drop("_match_key")
+
+        # Rename dst columns with _dst suffix to avoid collision
+        dst_renames = {}
+        for col in matched_dst.columns:
+            if col in matched_src.columns:
+                dst_renames[col] = col + "_dst"
+        if dst_renames:
+            matched_dst = matched_dst.rename(dst_renames)
+
+        matched = pl.concat([matched_src, matched_dst], how="horizontal")
+        matched = matched.with_columns(
+            pl.Series("name_score", scores),
+            pl.lit(tier).alias("match_tier"),
+            pl.lit(tier_priority.get(tier, 99)).alias("_tier_priority"),
+        )
+
+        results.append(matched)
+
+    if not results:
+        return pl.DataFrame()
+
+    combined = pl.concat(results, how="diagonal")
+
+    # Dedup: keep best tier per source record, then highest score within tier
+    combined = (
+        combined
+        .sort(["_tier_priority", "name_score"], descending=[False, True])
+        .unique(subset=[src_field], keep="first")
+        .drop([c for c in combined.columns if c.startswith("_")])
+    )
+    return combined
+
+
 # ---------------------------------------------------------------------------
 # Address scoring -- RapidFuzz batch ops
 # ---------------------------------------------------------------------------
@@ -208,15 +316,28 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
         if dest_df.height == 0:
             return pl.DataFrame()
 
-    # Name matching (Polars joins)
+    # Name matching
     mf = step_config["match_fields"][0]
-    matched = match_names_exact(
-        source_df, dest_df,
-        mf["source"], mf["destination"],
-        mf.get("tiers", ["raw", "clean"]),
-        aliases=aliases,
-        stopwords=stopwords,
-    )
+    method = mf.get("method", "exact")
+
+    if method == "fuzzy":
+        matched = match_names_fuzzy(
+            source_df, dest_df,
+            mf["source"], mf["destination"],
+            mf.get("tiers", ["raw", "clean"]),
+            threshold=mf.get("threshold", 80),
+            scorer=mf.get("scorer", "token_sort_ratio"),
+            aliases=aliases,
+            stopwords=stopwords,
+        )
+    else:
+        matched = match_names_exact(
+            source_df, dest_df,
+            mf["source"], mf["destination"],
+            mf.get("tiers", ["raw", "clean"]),
+            aliases=aliases,
+            stopwords=stopwords,
+        )
 
     if matched.height == 0:
         return pl.DataFrame()
@@ -412,9 +533,12 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
 
         if match_mode == "best_match":
             src_field = recipe["steps"][0]["match_fields"][0]["source"]
-            # Sort: prefer earlier step, then higher address score
+            # Sort: prefer earlier step, then higher name score, then higher address score
             sort_cols = ["_step_order"]
             sort_desc = [False]
+            if "name_score" in combined.columns:
+                sort_cols.append("name_score")
+                sort_desc.append(True)
             if "addr_score" in combined.columns:
                 sort_cols.append("addr_score")
                 sort_desc.append(True)

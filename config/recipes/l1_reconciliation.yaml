@@ -82,6 +82,57 @@ steps:
       - source: tpty_l1_id
         as: derived_l1_id
 
+  # Fuzzy steps run AFTER exact -- pipeline dedup prefers earlier steps
+  - name: Fuzzy Match Pop1 to core_parent
+    source: pop1
+    destination: core_parent
+    match_fields:
+      - source: l3_fmly_nm
+        destination: Vendor Name
+        method: fuzzy
+        threshold: 70
+        scorer: token_sort_ratio
+        tiers: [raw, clean]
+    address_support:
+      source: [hq_addr1, hq_addr2]
+      destination: [Address1, Address2]
+      parser: auto
+      threshold: 60
+    date_gate:
+      field: Updated
+      max_age_years: 2
+      applies_to: destination
+    inherit:
+      - source: Supplier Name
+        as: derived_l1_name
+      - source: Supplier ID
+        as: derived_l1_id
+
+  - name: Fuzzy Match Pop1 to Pop3
+    source: pop1
+    destination: pop3
+    match_fields:
+      - source: l3_fmly_nm
+        destination: l3_fmly_nm
+        method: fuzzy
+        threshold: 70
+        scorer: token_sort_ratio
+        tiers: [raw, clean]
+    address_support:
+      source: [hq_addr1, hq_addr2]
+      destination: [hq_addr1, hq_addr2]
+      parser: auto
+      threshold: 60
+    date_gate:
+      field: cntrct_cmpl_dt
+      max_age_years: 2
+      applies_to: destination
+    inherit:
+      - source: l1_fmly_nm
+        as: derived_l1_name
+      - source: tpty_l1_id
+        as: derived_l1_id
+
 output:
   format: xlsx
   path: output/l1_reconciliation_report.xlsx
@@ -114,6 +165,8 @@ output:
         header: Match Source
       - field: match_tier
         header: Match Tier
+      - field: name_score
+        header: Name Score
       - field: addr_score
         header: Address Score
       - field: addr_street_match

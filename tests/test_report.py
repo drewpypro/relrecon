@@ -322,7 +322,7 @@ def test_all_matches_dest_columns():
     # Should have matches from both steps
     assert matched.height > 0
     steps = matched["match_step"].unique().to_list()
-    assert len(steps) == 2, f"Expected 2 match steps, got {steps}"
+    assert len(steps) >= 2, f"Expected at least 2 match steps, got {steps}"
 
     with tempfile.TemporaryDirectory() as tmp:
         out = str(Path(tmp) / "test_all_matches.xlsx")

@@ -238,6 +238,7 @@ def validate_fields(
     # Known derived/metadata columns the pipeline creates
     known_derived = {
         "derived_l1_name", "derived_l1_id", "match_step", "match_tier",
+        "name_score",
         "addr_score", "addr_street_match", "addr_comparison", "addr_tier",
     }
 
