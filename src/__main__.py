@@ -23,13 +23,13 @@ def main() -> int:
     )
     parser.add_argument(
         "--recipe",
-        required=True,
-        help="Path to recipe YAML/JSON (e.g. config/recipes/l1_reconciliation.yaml)",
+        default="config/recipes/l1_reconciliation.yaml",
+        help="Path to recipe YAML/JSON (default: config/recipes/l1_reconciliation.yaml)",
     )
     parser.add_argument(
         "--data",
-        default=".",
-        help="Base directory for data files referenced in the recipe (default: current dir)",
+        default="data",
+        help="Base directory for data files referenced in the recipe (default: data)",
     )
     parser.add_argument(
         "--output",

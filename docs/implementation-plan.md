@@ -1,7 +1,7 @@
 # Implementation Plan: L1 Reconciliation Matching Engine
 
 **ADR-001 Status:** Accepted (Option C: Polars + RapidFuzz + optional libpostal)
-**Implementation Status:** All 5 phases complete and merged. 63 tests, 0 warnings. This document is retained as architectural reference.
+**Implementation Status:** All 5 phases complete and merged. 90 tests, 0 warnings. Fuzzy matching (Issue #31) added in PR #34. This document is retained as architectural reference.
 
 ---
 
@@ -134,13 +134,14 @@ filter:
 **matching.py:**
 - Filter populations (Pop1, Garbage, Pop3) per recipe
 - Date gate on destination records
-- Step 1: Pop1 → core_parent (L3 name exact match, Raw then Clean)
-- Step 2: Pop1 → Pop3 (L3 name exact match, Raw then Clean)
-- Address scoring as supporting evidence
+- Name matching per step, configurable via recipe:
+  - `method: exact` — Polars joins (Raw then Clean, or any tier combo)
+  - `method: fuzzy` — RapidFuzz `cdist` (full C++ score matrix, no Python loops). Configurable `threshold` (0-100, default 80) and `scorer` (token_sort_ratio, token_set_ratio, ratio, partial_ratio, WRatio)
+- Address scoring as supporting evidence (post-match, not a matching method)
 - Multi-match resolution (configurable per recipe):
-  - `best_match` (default): prefer core_parent over Pop3, then highest combined score
+  - `best_match` (default): prefer earlier step, then highest name_score, then highest addr_score
   - `all_matches`: return all candidates sorted by score (debug/analysis mode — larger report)
-- Track: which step matched, normalization tier, address score, all validation data
+- Track: which step matched, normalization tier, name score (fuzzy), address score, all validation data
 
 **Deliverable:** Working pipeline that processes synthetic datasets end-to-end.
 
@@ -250,4 +251,10 @@ Or set `parser: libpostal` in the recipe to require it (fails if not installed).
 | #15 | — | CLI entry point (`python3 -m src`) | Merged |
 | #16 | — | clean() punctuation fix | Merged |
 | #17 | — | Report destination address columns | Merged |
-| #18 | — | requirements.txt, CSV dedup, test warnings (63 total, 0 warnings) | Merged |
+| #18 | — | requirements.txt, CSV dedup, test warnings (63 total, 0 warnings) |
+| #22 | — | fix: coalesce variant dest columns in all_matches mode |
+| #26 | — | feat: semantic recipe validation + enhanced --dry-run |
+| #27 | — | feat: recipe-driven report column mapping (output.columns in recipe) |
+| #30 | — | fix: force string inference for CSV loading (infer_schema_length=0) |
+| #33 | — | fix: normalization config path resolution + name stopwords |
+| #34 | — | feat: fuzzy name matching (cdist, recipe-configurable) + script defaults (90 tests) | Merged |

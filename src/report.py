@@ -57,6 +57,7 @@ MAIN_REPORT_COLUMNS = [
     # Match metadata
     ("match_step", "Match Source"),
     ("match_tier", "Match Tier"),
+    ("name_score", "Name Score"),
     ("addr_score", "Address Score"),
     ("addr_street_match", "Street Match"),
     ("addr_comparison", "Address Comparison"),

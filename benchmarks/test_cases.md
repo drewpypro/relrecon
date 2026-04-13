@@ -44,7 +44,7 @@ Each option (A/B/C) runs the **same matching task** on the **same generated data
 
 ### TC-01: Name Matching — Fuzzy (score_cutoff=85%)
 
-> **Note:** The production matching engine uses exact matching (Raw/Clean) for names, not fuzzy. This test case uses fuzzy matching specifically to stress-test library speed on the most computationally expensive operation. It measures relative library performance, not the actual matching logic.
+> **Note:** The production matching engine now supports both exact (Raw/Clean) and fuzzy matching for names (PR #34). Fuzzy matching uses `process.cdist` for full C++ matrix computation. This test case stress-tests library speed on the most computationally expensive operation and measures relative library performance.
 
 **What:** Each option matches source `l3_fmly_nm` against target `vendor_name` using fuzzy string comparison at 85% threshold.
 
