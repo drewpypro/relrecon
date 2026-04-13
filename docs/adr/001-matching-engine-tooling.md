@@ -2,8 +2,8 @@
 
 **Status:** Accepted  
 **Date:** 2026-04-11  
-**Author:** Bogoy (AI Assistant)  
-**Deciders:** Drew (bobturdhands)
+**Author:** Bogoy (drewpy-code-agent)  
+**Deciders:** Drewpypro
 
 ---
 
