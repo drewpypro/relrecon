@@ -237,24 +237,3 @@ print(f"libpostal available: {LIBPOSTAL_AVAILABLE}")  # True if installed
 Or set `parser: libpostal` in the recipe to require it (fails if not installed).
 
 ---
-
-## PR History
-
-| PR | Phase | Description | Status |
-|---|---|---|---|
-| #8 | — | Implementation plan | Merged |
-| #9 | 1 | normalize.py + unicode_ranges.json + tests | Merged |
-| #10 | 2 | signal_analysis.py + config generation + tests | Merged |
-| #11 | 3 | address.py + address_patterns.json + tests | Merged |
-| #13 | 4 | matching.py + recipe.py + l1_reconciliation.yaml + tests | Merged |
-| #14 | 5 | report.py + Excel output + tests | Merged |
-| #15 | — | CLI entry point (`python3 -m src`) | Merged |
-| #16 | — | clean() punctuation fix | Merged |
-| #17 | — | Report destination address columns | Merged |
-| #18 | — | requirements.txt, CSV dedup, test warnings (63 total, 0 warnings) |
-| #22 | — | fix: coalesce variant dest columns in all_matches mode |
-| #26 | — | feat: semantic recipe validation + enhanced --dry-run |
-| #27 | — | feat: recipe-driven report column mapping (output.columns in recipe) |
-| #30 | — | fix: force string inference for CSV loading (infer_schema_length=0) |
-| #33 | — | fix: normalization config path resolution + name stopwords |
-| #34 | — | feat: fuzzy name matching (cdist, recipe-configurable) + script defaults (90 tests) | Merged |
