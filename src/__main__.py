@@ -169,7 +169,11 @@ def main() -> int:
     # Generate report
     output_path = args.output
     if output_path is None:
-        output_path = recipe.get("output", {}).get("path", "output/report.xlsx")
+        from datetime import datetime as _dt
+        recipe_name = recipe.get("name", "report").lower().replace(" ", "_")
+        recipe_name = "".join(c if c.isalnum() or c == "_" else "" for c in recipe_name)
+        timestamp = _dt.now().strftime("%Y%m%d_%H%M%S")
+        output_path = f"output/{recipe_name}_{timestamp}.xlsx"
 
     # Ensure output directory exists
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)

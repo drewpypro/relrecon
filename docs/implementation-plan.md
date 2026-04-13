@@ -206,6 +206,7 @@ sudo apt-get install -y curl autoconf automake libtool pkg-config
 git clone https://github.com/openvenues/libpostal
 cd libpostal
 ./bootstrap.sh
+# Use a persistent path 
 ./configure --datadir=/usr/local/share/libpostal
 make -j$(nproc)
 sudo make install

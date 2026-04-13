@@ -28,7 +28,7 @@ from normalize import clean, normalized, apply_tier
 try:
     from postal.parser import parse_address as _libpostal_parse
     LIBPOSTAL_AVAILABLE = True
-except ImportError:
+except (ImportError, SystemError, OSError):
     LIBPOSTAL_AVAILABLE = False
 
 
