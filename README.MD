@@ -14,7 +14,7 @@ The first use case ([L1 Reconciliation](docs/l1-recipe.md)) reconciles ~15k migr
 
 ```bash
 # Clone
-git clone https://git.drewpy.pro/drewpypro/relrecon.git
+git clone https://github.com/drewpypro/relrecon.git
 cd relrecon
 
 # Install dependencies

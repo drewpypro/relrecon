@@ -146,7 +146,7 @@ libpostal handles parsing AND normalization in one step (e.g., "6th Ave" → "6t
 
 **Decision:** Use **libpostal** (via `pypostal` Python bindings) instead of usaddress.
 
-*Credit: [@realoksi](https://git.drewpy.pro/realoksi) suggested libpostal for its international coverage and Python bindings.*
+*Credit: [@realoksi](https://github.com/realoksi) suggested libpostal for its international coverage and Python bindings.*
 
 ### Dependencies
 
