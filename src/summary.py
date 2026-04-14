@@ -87,7 +87,8 @@ def _format_timing(timing: dict) -> str:
 
 
 def generate_summary(recipe: dict, stats: dict, matched_df: pl.DataFrame,
-                     timing: dict | None = None) -> str:
+                     timing: dict | None = None,
+                     mermaid: str = "default") -> str:
     """Generate a markdown run summary from recipe config + pipeline stats.
 
     Args:
@@ -95,6 +96,7 @@ def generate_summary(recipe: dict, stats: dict, matched_df: pl.DataFrame,
         stats: Pipeline stats dict (total_source, matched_count, unmatched_count)
         matched_df: The matched DataFrame (for per-step counts)
         timing: Optional pipeline timing dict (load, setup, match, resolve)
+        mermaid: Mermaid diagram mode -- "default", "detailed", or "disabled"
 
     Returns:
         Markdown string
@@ -169,6 +171,127 @@ def generate_summary(recipe: dict, stats: dict, matched_df: pl.DataFrame,
         "Records that don't match or fail a threshold in one step "
         "move to the next. A record is only unmatched if it fails all steps."
     )
+
+    # --- Mermaid diagram ---
+    mermaid_output = None
+    if mermaid != "disabled":
+        mermaid_output = generate_mermaid(
+            recipe, stats, matched_df, detailed=(mermaid == "detailed")
+        )
+    if mermaid_output:
+        lines.append("")
+        lines.append("**Matching flow:**")
+        lines.append("")
+        lines.append("```mermaid")
+        lines.append(mermaid_output)
+        lines.append("```")
+
+    return "\n".join(lines)
+
+
+def generate_mermaid(recipe: dict, stats: dict, matched_df: pl.DataFrame | None = None,
+                     detailed: bool = False) -> str:
+    """Generate a Mermaid flowchart from recipe config + pipeline stats.
+
+    Args:
+        recipe: The parsed recipe dict
+        stats: Pipeline stats dict (total_source, matched_count, unmatched_count)
+        matched_df: Optional matched DataFrame (for per-step counts)
+        detailed: If True, include thresholds in step boxes (Option E)
+
+    Returns:
+        Mermaid flowchart string (without the ```mermaid fences)
+    """
+    total = stats.get("total_source", 0)
+    matched_total = stats.get("matched_count", 0)
+    unmatched_total = stats.get("unmatched_count", 0)
+
+    # Per-step counts
+    step_counts = {}
+    if matched_df is not None and "match_step" in matched_df.columns:
+        for row in matched_df.group_by("match_step").len().iter_rows():
+            step_counts[row[0]] = row[1]
+
+    steps = recipe.get("steps", [])
+    if not steps:
+        return ""
+
+    lines = ["flowchart TD"]
+
+    # Source population
+    source_pop = steps[0].get("source", "source")
+    lines.append(f"    Pop[{source_pop}: {total} records]")
+
+    # Track remaining for cascade
+    remaining = total
+
+    for i, step in enumerate(steps):
+        step_id = f"S{i+1}"
+        step_name = step.get("name", f"Step {i+1}")
+        count = step_counts.get(step_name, 0)
+        dest = step.get("destination", "?")
+
+        mf = step.get("match_fields", [{}])[0]
+        method = mf.get("method", "?").capitalize()
+
+        # Build step label
+        if detailed:
+            threshold = mf.get("threshold", 100 if mf.get("method") == "exact" else "?")
+            addr = step.get("address_support", {})
+            addr_thresh = addr.get("threshold", "none")
+            addr_part = f"addr >= {addr_thresh}%" if isinstance(addr_thresh, (int, float)) else ""
+
+            date_desc = ""
+            dg = step.get("date_gate")
+            if dg:
+                date_desc = f"{dg['field']} < {dg['max_age_years']}yr"
+            else:
+                for f in step.get("filters", []):
+                    if f.get("op") == "max_age_years":
+                        date_desc = f"{f['field']} < {f['value']}yr"
+                        break
+
+            detail_parts = [p for p in [addr_part, date_desc] if p]
+            detail_line = " | ".join(detail_parts)
+            if detail_line:
+                label = f"{step_id}[\"Step {i+1}: {method} to {dest}\n{detail_line}\"]"
+            else:
+                label = f"{step_id}[Step {i+1}: {method} to {dest}]"
+        else:
+            label = f"{step_id}[Step {i+1}: {method} to {dest}]"
+
+        lines.append(f"    {label}")
+
+    # Matched and unmatched nodes
+    lines.append(f"    M[Matched: {matched_total}]")
+    lines.append(f"    U[Unmatched: {unmatched_total}]")
+    lines.append("")
+
+    # Connections -- cascade flow
+    remaining = total
+
+    for i, step in enumerate(steps):
+        step_id = f"S{i+1}"
+        step_name = step.get("name", f"Step {i+1}")
+        count = step_counts.get(step_name, 0)
+
+        # Connect to this step (solid from Pop, dashed cascade from previous step)
+        if i == 0:
+            lines.append(f"    Pop --> S1")
+
+        # Matched output
+        if count > 0:
+            lines.append(f"    {step_id} -->|{count} matched| M")
+
+        remaining -= count
+
+        # If this is the last step, remaining goes to unmatched
+        if i == len(steps) - 1:
+            if remaining > 0:
+                lines.append(f"    {step_id} -->|{remaining} unmatched| U")
+        else:
+            # Dashed line to next step for cascade
+            lines.append(f"    {step_id} -.->|{remaining} remaining| S{i+2}")
 
     return "\n".join(lines)
 

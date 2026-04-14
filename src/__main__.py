@@ -46,6 +46,14 @@ def main() -> int:
         action="store_true",
         help="Validate recipe and load data without running the matching pipeline",
     )
+    parser.add_argument(
+        "--mermaid",
+        nargs="?",
+        const="default",
+        default="default",
+        choices=["default", "detailed", "disabled"],
+        help="Mermaid diagram mode in summary: default, detailed, or disabled (default: default)",
+    )
 
     args = parser.parse_args()
 
@@ -197,7 +205,11 @@ def main() -> int:
     try:
         from summary import generate_summary
         timing = result.get("timing")
-        summary_md = generate_summary(recipe, stats, result["matched"], timing=timing)
+        mermaid_mode = getattr(args, "mermaid", "default")
+        summary_md = generate_summary(
+            recipe, stats, result["matched"], timing=timing,
+            mermaid=mermaid_mode,
+        )
         summary_path = report_path.replace(".xlsx", "_summary.md")
         Path(summary_path).parent.mkdir(parents=True, exist_ok=True)
         with open(summary_path, "w") as f:

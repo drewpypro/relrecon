@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from summary import generate_summary, write_summary_tab
+from summary import generate_summary, generate_mermaid, write_summary_tab
 
 
 # --- Fixtures ---
@@ -188,3 +188,65 @@ class TestWriteSummaryTab:
             all_values.append(row)
         header_rows = [r for r in all_values if r and r[0] == "Step"]
         assert len(header_rows) == 1
+
+
+# --- Mermaid ---
+
+class TestGenerateMermaid:
+    def test_starts_with_flowchart(self):
+        md = generate_mermaid(_recipe(), _stats(), _matched_df())
+        assert md.startswith("flowchart TD")
+
+    def test_contains_source_population(self):
+        md = generate_mermaid(_recipe(), _stats(), _matched_df())
+        assert "target: 100 records" in md
+
+    def test_contains_step_nodes(self):
+        md = generate_mermaid(_recipe(), _stats(), _matched_df())
+        assert "Step 1: Exact to ref" in md
+        assert "Step 2: Fuzzy to ref" in md
+
+    def test_contains_matched_count(self):
+        md = generate_mermaid(_recipe(), _stats(), _matched_df())
+        assert "Matched: 85" in md
+
+    def test_contains_unmatched_count(self):
+        md = generate_mermaid(_recipe(), _stats(), _matched_df())
+        assert "Unmatched: 15" in md
+
+    def test_per_step_counts(self):
+        md = generate_mermaid(_recipe(), _stats(), _matched_df())
+        assert "70 matched" in md
+        assert "15 matched" in md
+
+    def test_cascade_remaining(self):
+        md = generate_mermaid(_recipe(), _stats(), _matched_df())
+        # After step 1 (70 matched), 30 remaining
+        assert "30 remaining" in md
+
+    def test_dashed_cascade_lines(self):
+        md = generate_mermaid(_recipe(), _stats(), _matched_df())
+        assert "-.->" in md
+
+    def test_no_duplicate_connections(self):
+        md = generate_mermaid(_recipe(), _stats(), _matched_df())
+        lines = md.split("\n")
+        # Should only have one connection from Pop
+        pop_connections = [l for l in lines if l.strip().startswith("Pop -->")]
+        assert len(pop_connections) == 1
+
+    def test_detailed_mode(self):
+        md = generate_mermaid(_recipe(), _stats(), _matched_df(), detailed=True)
+        assert "addr >=" in md
+        assert "updated" in md
+
+    def test_empty_steps(self):
+        recipe = _recipe()
+        recipe["steps"] = []
+        md = generate_mermaid(recipe, _stats(), _matched_df())
+        assert md == ""
+
+    def test_mermaid_in_summary_markdown(self):
+        md = generate_summary(_recipe(), _stats(), _matched_df())
+        assert "```mermaid" in md
+        assert "flowchart TD" in md
