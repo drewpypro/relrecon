@@ -14,7 +14,7 @@ Address scoring involves three subsystems. Each does one job:
 
 | System | Module | Config | Job |
 |---|---|---|---|
-| **Normalization** | normalize.py | `aliases.json`, `stopwords.json` | Text cleanup: lowercase, strip punctuation, expand aliases (blvd→boulevard), remove stopwords |
+| **Normalization** | normalize.py | `aliases.json`, `stopwords.json` | Text cleanup: lowercase, remove commas/periods/semicolons/colons (hyphens/apostrophes/ampersands preserved), expand aliases (blvd→boulevard), remove stopwords |
 | **Parsing** | address.py | `address_patterns.json` (or libpostal) | Structural decomposition: extract street name, suffix, unit, state, zip |
 | **Scoring** | address.py + RapidFuzz | -- | String similarity scoring on full address + street name, weighted combination |
 
@@ -64,7 +64,7 @@ For each address pair, per normalization tier:
 
 ```
 1. NORMALIZE  apply_tier(address, tier, aliases, stopwords)
-              raw: as-is | clean: lowercase + strip | normalized: clean + aliases + stopwords
+              raw: as-is | clean: lowercase + remove ,.;: | normalized: clean + aliases + stopwords
                     │
 2. SCORE      rfuzz.token_sort_ratio(src_normalized, dst_normalized)
               produces full_score (0-100)
