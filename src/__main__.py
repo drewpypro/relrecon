@@ -149,7 +149,6 @@ def main() -> int:
         print(summary)
         return 1 if val_errors else 0
 
-    # Run the pipeline
     print("Running matching pipeline...")
     t0 = time.time()
     try:
@@ -161,7 +160,12 @@ def main() -> int:
     elapsed = time.time() - t0
 
     stats = result.get("stats", {})
+    timing = result.get("timing", {})
     print(f"Pipeline complete in {elapsed:.2f}s")
+    if timing:
+        phases = [("load", "Load"), ("setup", "Setup"), ("match", "Match"), ("resolve", "Resolve")]
+        parts = [f"{label} {timing[k]:.2f}s" for k, label in phases if k in timing]
+        print(f"  Timing:            {' | '.join(parts)}")
     print(f"  Source records:    {stats.get('total_source', 'N/A')}")
     print(f"  Matched:           {stats.get('matched_count', 'N/A')}")
     print(f"  Unmatched:         {stats.get('unmatched_count', 'N/A')}")
@@ -178,7 +182,7 @@ def main() -> int:
     # Ensure output directory exists
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    print(f"Generating report: {output_path}")
+    t_report = time.time()
     report_path = generate_report(
         result["matched"],
         result["unmatched"],
@@ -186,7 +190,7 @@ def main() -> int:
         stats=stats,
         recipe=recipe,
     )
-    print(f"Report saved: {report_path}")
+    print(f"Report saved: {report_path} ({time.time() - t_report:.2f}s)")
 
     return 0
 

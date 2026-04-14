@@ -459,11 +459,13 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
 def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
     """Run the complete matching pipeline from a recipe.
 
-    Returns dict with 'matched', 'unmatched' DataFrames and 'stats'.
+    Returns dict with 'matched', 'unmatched' DataFrames, 'stats', and 'timing'.
     """
+    import time as _time
     from recipe import load_source, filter_population, build_filter_expr
+    timings = {}
 
-    # Load sources
+    t = _time.time()
     sources = {}
     for name, cfg in recipe["sources"].items():
         sources[name] = load_source(cfg, base_dir)
@@ -542,7 +544,9 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             f"Recipe has {len(val_errors)} field error(s). Fix recipe config and retry."
         )
 
-    # Load normalization config (aliases/stopwords for normalized tier)
+    timings["load"] = _time.time() - t
+
+    t = _time.time()
     norm_cfg = recipe.get("normalization", {})
     aliases = None
     stopwords = None
@@ -565,7 +569,9 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             else:
                 stopwords = sw_data
 
-    # Run matching steps
+    timings["setup"] = _time.time() - t
+
+    t = _time.time()
     match_mode = recipe.get("output", {}).get("match_mode", "best_match")
     all_matched = []
     matched_source_keys = set()
@@ -634,7 +640,9 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             if track_field in matched.columns:
                 matched_source_keys.update(matched[track_field].to_list())
 
-    # Combine and resolve
+    timings["match"] = _time.time() - t
+
+    t = _time.time()
     if all_matched:
         combined = pl.concat(all_matched, how="diagonal")
 
@@ -688,6 +696,8 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             pl.lit(None).cast(pl.Float64).alias("best_rejected_score"),
         )
 
+    timings["resolve"] = _time.time() - t
+
     return {
         "matched": combined,
         "unmatched": unmatched,
@@ -697,4 +707,5 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             "matched_count": combined.height,
             "unmatched_count": unmatched.height,
         },
+        "timing": timings,
     }
