@@ -407,10 +407,11 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
         dst_a1 = ac["destination"][0]
         dst_a2 = ac["destination"][1] if len(ac["destination"]) > 1 else ac["destination"][0]
 
-        # Handle suffixed column names from join
-        if dst_a1 not in matched.columns and dst_a1 + "_dst" in matched.columns:
+        # Prefer _dst suffixed columns (join disambiguation) over unsuffixed
+        # (which is the source side when names collide).
+        if dst_a1 + "_dst" in matched.columns:
             dst_a1 = dst_a1 + "_dst"
-        if dst_a2 not in matched.columns and dst_a2 + "_dst" in matched.columns:
+        if dst_a2 + "_dst" in matched.columns:
             dst_a2 = dst_a2 + "_dst"
 
         # Score using Phase 3 address module (multi-tier, street weighting, cross-compare)
