@@ -180,6 +180,7 @@ Output feeds directly into recipe config (`config/stopwords.json`, `config/alias
 | **README** (this file) | What this is, how to use it, framework overview, L1 recipe details |
 | **[ADR-001](docs/adr/001-matching-engine-tooling.md)** | Why this tech stack (Polars + RapidFuzz + libpostal). Four options benchmarked. |
 | **[Implementation Plan](docs/implementation-plan.md)** | How it was built — 5 phases, technical decisions, PR history, libpostal install guide |
+| **[Filter Ops Reference](docs/filter-ops.md)** | Standard and special filter ops, population vs step filters, how to extend |
 
 ## The First Recipe: L1 Reconciliation
 
