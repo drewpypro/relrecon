@@ -245,3 +245,5 @@ print(f"libpostal available: {LIBPOSTAL_AVAILABLE}")  # True if installed
 ```
 
 Or set `parser: libpostal` in the recipe to require it (fails if not installed).
+
+---
