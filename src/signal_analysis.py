@@ -9,7 +9,7 @@ Profiles source data to bootstrap normalization config:
 - Unicode profile per column
 - Data quality summary
 
-Uses normalize.py for all transformations -- single source of truth.
+Uses normalize.py for all transformations. Single source of truth.
 """
 
 import json
@@ -340,7 +340,7 @@ def analyze_dataset(df: pl.DataFrame, columns: list,
                                   unicode_mode=unicode_mode)
         results["columns"][col] = analysis
 
-        # Aggregate stopwords by detected type -- known tokens always included,
+        # Aggregate stopwords by detected type. Known tokens always included,
         # others must meet the higher aggregation threshold (0.2)
         # vs the suggestion threshold (0.15) to reduce noise in output config
         col_type = analysis["detected_type"]
@@ -350,7 +350,7 @@ def analyze_dataset(df: pl.DataFrame, columns: list,
             if sw["known"] or sw["frequency"] >= 0.2:
                 all_stopwords[col_type].add(sw["token"])
 
-        # Aggregate aliases -- output format matches normalize.normalized() contract:
+        # Aggregate aliases. Output format matches normalize.normalized() contract:
         # {"variant_raw": "canonical_clean"} so normalized() replaces variant with canonical
         for alias in analysis["suggested_aliases"]:
             if len(alias["variants"]) > 1:

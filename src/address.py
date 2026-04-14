@@ -134,7 +134,7 @@ def classify_tokens(address: str, patterns: Optional[dict] = None) -> dict:
     for i, token in enumerate(tokens):
         clean_token = token.rstrip(".,;:")
 
-        # Street suffixes -- match anywhere
+        # Street suffixes: match anywhere
         if clean_token in patterns["street_suffixes"] and clean_token not in patterns["state_codes"]:
             if suffix_index is None:
                 result["street_suffix"] = clean_token
@@ -180,7 +180,7 @@ def classify_tokens(address: str, patterns: Optional[dict] = None) -> dict:
             result["classified"] = True
 
         else:
-            # Check zip patterns -- US 5-digit and 5+4 only
+            # Zip patterns: US 5-digit and 5+4 only
             # Only in the last 3 tokens to avoid matching street numbers
             if i >= last_n:
                 for zip_pat in patterns["zip_patterns"]:
@@ -198,7 +198,7 @@ def classify_tokens(address: str, patterns: Optional[dict] = None) -> dict:
                 street_tokens.append(tokens[i])
         result["street_name"] = " ".join(street_tokens)
     else:
-        # No suffix found -- unclassified tokens might be the street
+        # No suffix found. Unclassified tokens might be the street
         result["unclassified"] = [tokens[i] for i in range(len(tokens))
                                    if i not in classified_indices]
 

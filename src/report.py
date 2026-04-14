@@ -2,8 +2,9 @@
 Report generation module for the relational matching framework.
 
 Generates formatted Excel workbooks from matching pipeline results:
-- Main Report tab: matched records with derived L1, confidence, validation columns
-- Analysis tab: unmatched/low-confidence records with reason codes
+- Summary tab: recipe config, per-step counts, cascade explanation
+- Matched tab: matched records with derived fields, confidence, validation columns
+- Analysis tab: unmatched records with reason codes
 
 Uses openpyxl for Excel formatting (headers, conditional formatting, column widths).
 """
@@ -43,18 +44,15 @@ ANALYSIS_HEADER_FILL = PatternFill(start_color="C00000", end_color="C00000", fil
 # Column definitions
 # ---------------------------------------------------------------------------
 
-# Main Report columns -- order matters for the Excel output
+# Main Report columns (order matters for Excel output)
 MAIN_REPORT_COLUMNS = [
-    # Source (Pop1) fields
     ("l3_fmly_nm", "Source L3 Name"),
     ("vendor_id", "Source Vendor ID"),
     ("tpty_assm_nm", "Assessment Name"),
     ("hq_addr1", "Source Address 1"),
     ("hq_addr2", "Source Address 2"),
-    # Derived L1
     ("derived_l1_name", "Derived L1 Name"),
     ("derived_l1_id", "Derived L1 ID"),
-    # Match metadata
     ("match_step", "Match Source"),
     ("match_tier", "Match Tier"),
     ("name_score", "Name Score"),
@@ -64,14 +62,12 @@ MAIN_REPORT_COLUMNS = [
     ("addr_tier", "Address Tier"),
 ]
 
-# Destination fields -- check for suffixed columns from join
+# Destination fields (check for suffixed columns from join)
 # Multiple entries per header handle core_parent vs Pop3 column naming
 DEST_COLUMNS = [
-    # Dest L3 name
     ("Vendor Name", "Dest L3 Name"),
     ("Vendor Name_dst", "Dest L3 Name"),
     ("l3_fmly_nm_dst", "Dest L3 Name"),
-    # Dest addresses
     ("Address1", "Dest Address 1"),
     ("hq_addr1_dst", "Dest Address 1"),
     ("Address2", "Dest Address 2"),
@@ -109,7 +105,12 @@ def _write_headers(ws, columns: list, header_fill=HEADER_FILL):
 
 
 def _write_data(ws, df: pl.DataFrame, columns: list, start_row: int = 2):
-    """Write DataFrame rows to worksheet, matching columns by name."""
+    """Write DataFrame rows to worksheet, matching columns by name.
+
+    Uses iter_rows. Required for cell-by-cell openpyxl writes.
+    Not a data processing loop (ADR-001 prohibits iterrows for data ops,
+    not for output serialization).
+    """
     available_cols = set(df.columns)
 
     for row_idx, row in enumerate(df.iter_rows(named=True), start_row):
@@ -182,7 +183,7 @@ def _coalesce_variant_columns(df: pl.DataFrame, column_defs: list) -> pl.DataFra
     return df
 
 
-# Keep backward-compatible alias
+# Backward-compatible alias (used by legacy code paths without recipe-driven columns)
 _coalesce_dest_columns = lambda df: _coalesce_variant_columns(df, DEST_COLUMNS)
 
 
@@ -212,7 +213,7 @@ def _build_columns_from_recipe(recipe_columns: list, df: pl.DataFrame) -> list:
     for entry in recipe_columns:
         header = entry["header"]
         if "fields" in entry:
-            # Variant column — use first present (coalesce already ran)
+            # Variant column: use first present (coalesce already ran)
             for f in entry["fields"]:
                 if f in available:
                     resolved.append((f, header))
@@ -227,16 +228,16 @@ def _build_columns_from_recipe(recipe_columns: list, df: pl.DataFrame) -> list:
 def generate_report(matched_df: pl.DataFrame, unmatched_df: pl.DataFrame,
                     output_path: str, stats: Optional[dict] = None,
                     recipe: Optional[dict] = None) -> str:
-    """Generate the Excel report with Matched and Analysis tabs.
+    """Generate the Excel report with Summary, Matched, and Analysis tabs.
 
     Args:
         matched_df: Matched records from pipeline
         unmatched_df: Unmatched records from pipeline
         output_path: Path to write the Excel file
         stats: Optional pipeline stats dict
-        recipe: Optional recipe dict — when present and output.columns
+        recipe: Optional recipe dict. When present and output.columns
                 is defined, uses recipe-driven column mapping instead
-                of hardcoded defaults.
+                of hardcoded defaults. Also enables the Summary tab.
 
     Returns:
         Path to the generated report

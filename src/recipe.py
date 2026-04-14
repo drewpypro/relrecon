@@ -77,14 +77,13 @@ def validate_recipe(recipe: dict) -> list[str]:
     """
     warnings: list[str] = []
 
-    # --- JSON Schema validation ---
     schema = _load_recipe_schema()
     if schema:
         try:
             from jsonschema import Draft7Validator
         except ImportError:
             warnings.append(
-                "jsonschema not installed — schema validation skipped. "
+                "jsonschema not installed -- schema validation skipped. "
                 "Install with: pip install jsonschema"
             )
         else:
@@ -102,7 +101,7 @@ def validate_recipe(recipe: dict) -> list[str]:
                 detail = "\n  ".join(schema_errors)
                 raise ValueError(f"Recipe schema validation failed:\n  {detail}")
 
-    # --- Legacy structural checks (fallback for environments without jsonschema) ---
+    # Fallback for environments without jsonschema
     required = ["name", "sources", "populations", "steps", "output"]
     missing = [k for k in required if k not in recipe]
     if missing:
@@ -120,7 +119,6 @@ def validate_recipe(recipe: dict) -> list[str]:
     if "format" not in recipe["output"]:
         raise ValueError("Output missing 'format' field")
 
-    # --- Semantic warnings ---
     source_pops = {step["source"] for step in recipe.get("steps", [])}
     for pop_name in source_pops:
         pop_cfg = recipe.get("populations", {}).get(pop_name, {})
@@ -129,7 +127,7 @@ def validate_recipe(recipe: dict) -> list[str]:
         if "record_key" not in pop_cfg:
             warnings.append(
                 f'Population "{pop_name}" has no record_key. '
-                "Dedup will fall back to match field — records with "
+                "Dedup will fall back to match field -- records with "
                 "duplicate names may be collapsed. Set record_key to the "
                 "field that uniquely identifies each source record."
             )
@@ -228,7 +226,7 @@ def validate_fields(
         populations: {name: {config, df, source}} after filtering
 
     Returns:
-        (errors, warnings) — errors are critical (match_fields, inherit),
+        (errors, warnings). Errors are critical (match_fields, inherit),
         warnings are non-fatal (address_support, date_gate, filter).
     """
     errors = []
@@ -287,7 +285,7 @@ def validate_fields(
                 if dst_df is not None:
                     _check(af, dst_df, f"{step_label} address_support.destination", critical=False)
 
-        # date_gate (warning — legacy, still supported)
+        # date_gate (warning, legacy still supported)
         if "date_gate" in step:
             dg = step["date_gate"]
             dg_field = dg.get("field", "")
@@ -316,7 +314,7 @@ def validate_fields(
 
     # Validate output.columns field references
     # These are explicitly requested by the recipe author, so missing
-    # fields are errors (not warnings) — the report will silently drop them.
+    # fields are errors (not warnings). The report will silently drop them.
     output_columns = recipe.get("output", {}).get("columns", {})
     # Collect all known source columns for validation
     all_source_cols: set[str] = set()
@@ -349,7 +347,7 @@ def validate_fields(
             if "field" in entry and "fields" in entry:
                 errors.append(
                     f'output.columns.{tab_key}[{i}]: entry has both '
-                    f'"field" and "fields" — use one or the other'
+                    f'"field" and "fields" -- use one or the other'
                 )
             if "field" in entry:
                 f = entry["field"]
@@ -361,7 +359,7 @@ def validate_fields(
             if "fields" in entry:
                 for f in entry["fields"]:
                     # Variant fields include _dst suffixed cols which won't
-                    # exist until after the join — only warn on base names
+                    # exist until after the join. Only warn on base names
                     if not f.endswith("_dst") and f not in all_source_cols:
                         warnings.append(
                             f'output.columns.{tab_key}: variant field "{f}" '

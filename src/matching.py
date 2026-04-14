@@ -1,9 +1,9 @@
 """
-Core matching engine -- ADR Option C aligned.
+Core matching engine. ADR Option C aligned.
 
 Uses Polars for all data ops (joins, filtering, expressions).
-Uses RapidFuzz process.extract for batch fuzzy matching.
-No Python row-level loops for matching -- vectorized throughout.
+Uses RapidFuzz process.cdist for batch fuzzy matching (full C++ matrix).
+No Python row-level loops for matching. Vectorized throughout.
 Address scoring uses RapidFuzz batch ops where possible.
 """
 
@@ -58,7 +58,7 @@ def apply_date_gate(df: pl.DataFrame, field: str, max_age_years: int) -> pl.Data
 
 
 # ---------------------------------------------------------------------------
-# Name matching -- Polars native joins (no Python loops)
+# Name matching (Polars native joins, no Python loops)
 # ---------------------------------------------------------------------------
 
 def _normalized_column(df: pl.DataFrame, col: str, alias: str,
@@ -78,7 +78,7 @@ def _clean_column(df: pl.DataFrame, col: str, alias: str) -> pl.DataFrame:
 
     Uses the shared normalization function to ensure consistency
     between signal analysis and matching (per README requirement).
-    Polars map_elements is used here -- acceptable because this runs
+    Polars map_elements is used here. Acceptable because this runs
     once per join setup, not per-row in a matching loop.
     """
     return df.with_columns(
@@ -190,13 +190,11 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             src = _clean_column(source_df, src_field, "_match_key")
             dst = _clean_column(dest_df, dst_field, "_match_key")
 
-        # Build key lists for cdist
         src_keys = [str(k) if k is not None else "" for k in src["_match_key"].to_list()]
         dst_keys = [str(k) if k is not None else "" for k in dst["_match_key"].to_list()]
         if not dst_keys or not src_keys:
             continue
 
-        # Compute full score matrix in C++ (no Python loops)
         # workers=-1 uses all available cores
         score_matrix = rprocess.cdist(
             src_keys, dst_keys,
@@ -204,11 +202,10 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             dtype=np.float32, workers=-1,
         )
 
-        # Extract best match per source row
         best_dst_idxs = score_matrix.argmax(axis=1)
         best_scores = score_matrix[np.arange(len(src_keys)), best_dst_idxs]
 
-        # Filter to rows that met the threshold (cdist sets below-threshold to 0)
+        # cdist sets below-threshold scores to 0
         mask = best_scores >= threshold
         if not mask.any():
             continue
@@ -220,7 +217,6 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
         matched_src = src[src_idxs].drop("_match_key")
         matched_dst = dst[dst_idxs].drop("_match_key")
 
-        # Rename dst columns with _dst suffix to avoid collision
         dst_renames = {}
         for col in matched_dst.columns:
             if col in matched_src.columns:
@@ -253,7 +249,7 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
 
 
 # ---------------------------------------------------------------------------
-# Address scoring -- RapidFuzz batch ops
+# Address scoring (RapidFuzz batch ops)
 # ---------------------------------------------------------------------------
 
 def score_addresses_batch(matched_df: pl.DataFrame,
@@ -375,7 +371,6 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             return pl.DataFrame(), {"filtered_by_step_filter": set()}
         return pl.DataFrame()
 
-    # Name matching
     mf = step_config["match_fields"][0]
     method = mf.get("method", "exact")
 
@@ -405,7 +400,6 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             return pl.DataFrame(), {}
         return pl.DataFrame()
 
-    # Address scoring (if configured)
     rejections = {}
     if "address_support" in step_config:
         ac = step_config["address_support"]
@@ -435,10 +429,8 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
                     rejections["addr_below_threshold"] = dict(zip(keys, scores))
             matched = matched.filter(pl.col("addr_score") >= cutoff)
 
-    # Add step metadata
     matched = matched.with_columns(pl.lit(step_config["name"]).alias("match_step"))
 
-    # Inherit fields
     for inherit_cfg in step_config.get("inherit", []):
         src_col = inherit_cfg["source"]
         as_col = inherit_cfg["as"]
@@ -459,7 +451,13 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
 def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
     """Run the complete matching pipeline from a recipe.
 
-    Returns dict with 'matched', 'unmatched' DataFrames, 'stats', and 'timing'.
+    Returns:
+        dict with keys:
+        - matched: pl.DataFrame of matched records
+        - unmatched: pl.DataFrame of unmatched records with reason codes
+        - populations: dict of {name: DataFrame} for each population
+        - stats: {total_source, matched_count, unmatched_count}
+        - timing: {load, setup, match, resolve} in seconds
     """
     import time as _time
     from recipe import load_source, filter_population, build_filter_expr
@@ -503,7 +501,7 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             filtered = filter_population(src_df, pop_cfg)
             populations[pop_name] = {"config": pop_cfg, "df": filtered, "source": src_name}
         else:
-            # Remainder -- computed after other pops
+            # Remainder: computed after other pops
             populations[pop_name] = {"config": pop_cfg, "df": None, "source": src_name}
 
     # Compute remainder populations (exclude Pop1 + Garbage from same source)
@@ -530,7 +528,7 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
 
         pop_data["df"] = remainder
 
-    # Semantic field validation — runs every time, not just dry-run
+    # Semantic field validation (runs every time, not just dry-run)
     from recipe import validate_fields, RecipeValidationError
     val_errors, val_warnings = validate_fields(recipe, sources, populations)
     for w in val_warnings:
@@ -551,14 +549,14 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
     aliases = None
     stopwords = None
     if norm_cfg.get("aliases"):
-        aliases_path = Path(norm_cfg["aliases"]) if Path(norm_cfg["aliases"]).is_absolute() else Path(norm_cfg["aliases"])
+        aliases_path = Path(norm_cfg["aliases"])
         # Try relative to cwd first, then relative to base_dir
         if not aliases_path.exists():
             aliases_path = Path(base_dir) / norm_cfg["aliases"]
         if aliases_path.exists():
             aliases = json.loads(aliases_path.read_text())
     if norm_cfg.get("stopwords"):
-        sw_path = Path(norm_cfg["stopwords"]) if Path(norm_cfg["stopwords"]).is_absolute() else Path(norm_cfg["stopwords"])
+        sw_path = Path(norm_cfg["stopwords"])
         if not sw_path.exists():
             sw_path = Path(base_dir) / norm_cfg["stopwords"]
         if sw_path.exists():
@@ -597,7 +595,7 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
         import sys
         print(
             f'[WARN] Population "{pop1_name}" has no record_key. '
-            f"Falling back to match field '{src_match_field}' for dedup — "
+            f"Falling back to match field '{src_match_field}' for dedup -- "
             "records with duplicate names may be collapsed.",
             file=sys.stderr,
         )

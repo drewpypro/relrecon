@@ -28,7 +28,7 @@ elif op == "ends_with":
 
 Then add the op name to the enum in `config/recipe_schema.json` under both `definitions.filter_condition` and `definitions.step_filter_condition`.
 
-That's it — the new op immediately works in population filters and step filters.
+That's it: the new op immediately works in population filters and step filters.
 
 ## Special Ops
 
@@ -50,7 +50,7 @@ elif op == "my_new_op":
     return df.filter(...)
 ```
 
-Then add the op name to the `step_filter_condition` enum in `config/recipe_schema.json` (but **not** to `filter_condition` — special ops don't work in population filters).
+Then add the op name to the `step_filter_condition` enum in `config/recipe_schema.json` (but **not** to `filter_condition`: special ops don't work in population filters).
 
 Special ops are for things that can't be expressed as a single Polars column expression: multi-format parsing, cross-column logic, computed values, etc.
 
@@ -105,9 +105,9 @@ steps:
 ```
 
 `applies_to` options:
-- `destination` (default) — filter the destination DataFrame
-- `source` — filter the source DataFrame
-- `both` — filter both
+- `destination` (default): filter the destination DataFrame
+- `source`: filter the source DataFrame
+- `both`: filter both
 
 ### Legacy: `date_gate`
 
