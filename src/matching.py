@@ -418,6 +418,8 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
         matched = score_addresses_batch(
             matched, src_a1, src_a2, dst_a1, dst_a2,
             parser=ac.get("parser", "auto"),
+            aliases=aliases,
+            stopwords=stopwords,
         )
 
         if "threshold" in ac and "addr_score" in matched.columns:
