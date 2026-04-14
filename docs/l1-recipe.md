@@ -32,7 +32,7 @@ The only reliable field for the migrated records is the **child/vendor name (`l3
 | Address | Address1, Address2 | hq_addr1, hq_addr2 |
 
 > [!IMPORTANT]
-> Pop1's parent-level fields were populated with placeholder or incorrect data during migration. The recipe marks these as `invalid_fields` in the population config (currently informational only, see [Issue #74](https://git.drewpy.pro/drewpypro/relational_matching/issues/74)).
+> Pop1's parent-level fields were populated with placeholder or incorrect data during migration. The recipe marks these as `invalid_fields` in the population config (currently informational only, see [Issue #74](https://github.com/drewpypro/relational_matching/issues/74)).
 > The goal is to derive correct L1 by matching L3 names against trusted sources and inheriting the parent relationship.
 
 ## Datasets
