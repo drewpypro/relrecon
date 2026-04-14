@@ -15,6 +15,56 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 
+def _run_signal_analysis(args) -> int:
+    """Run signal analysis on a data file and print a formatted report."""
+    from recipe import load_source
+    from signal_analysis import analyze_dataset, select_columns
+    from signal_report import format_report
+
+    file_path = Path(args.analyze)
+    if not file_path.exists():
+        print(f"Error: file not found: {file_path}", file=sys.stderr)
+        return 1
+
+    save_dir = Path(args.save_config) if args.save_config else None
+    if save_dir and not save_dir.is_dir():
+        print(f"Error: directory '{save_dir}' does not exist. Create it first.",
+              file=sys.stderr)
+        return 1
+
+    try:
+        df = load_source({"file": str(file_path)}, base_dir=".")
+    except Exception as e:
+        print(f"Error loading file: {e}", file=sys.stderr)
+        return 1
+
+    print(f"Loaded: {file_path} ({df.height} rows, {df.width} cols)")
+
+    try:
+        columns, msg = select_columns(df, args.columns)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+    if msg:
+        print(msg)
+
+    print(f"Analyzing {len(columns)} columns...")
+    results = analyze_dataset(df, columns, unicode_mode="profile_only",
+                              output_dir=str(save_dir) if save_dir else None)
+
+    sections = set(s.strip() for s in args.sections.split(",")) if args.sections else None
+    top_n = args.top if args.top > 0 else None
+    report = format_report(results, file_path=str(file_path), columns=columns,
+                           sections=sections, top_n=top_n)
+    print()
+    print(report)
+
+    if save_dir:
+        print(f"Config saved to: {save_dir}/stopwords.json, {save_dir}/aliases.json")
+
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="relational_matching",
@@ -54,8 +104,41 @@ def main() -> int:
         choices=["default", "detailed", "disabled"],
         help="Mermaid diagram mode in summary: default, detailed, or disabled (default: default)",
     )
+    parser.add_argument(
+        "--analyze",
+        default=None,
+        metavar="FILE",
+        help="Run signal analysis on a data file instead of the matching pipeline",
+    )
+    parser.add_argument(
+        "--columns",
+        default=None,
+        help="'auto' to detect name/address columns, or comma-separated names. Default: all string columns",
+    )
+    parser.add_argument(
+        "--save-config",
+        default=None,
+        metavar="DIR",
+        help="Save suggested stopwords.json and aliases.json to this directory (use with --analyze)",
+    )
+    parser.add_argument(
+        "--sections",
+        default=None,
+        help="Comma-separated report sections to include "
+             "(quality,tokens,stopwords,aliases,unicode,suggestions). Default: all",
+    )
+    parser.add_argument(
+        "--top",
+        type=int,
+        default=15,
+        help="Max items per section (tokens, aliases, stopwords). 0 = show all. Default: 15",
+    )
 
     args = parser.parse_args()
+
+    # Signal analysis mode
+    if args.analyze:
+        return _run_signal_analysis(args)
 
     # Validate recipe path exists
     recipe_path = Path(args.recipe)
@@ -73,7 +156,7 @@ def main() -> int:
     if args.no_libpostal:
         import address
         address.LIBPOSTAL_AVAILABLE = False
-        print("libpostal disabled — using built-in address tokenizer")
+        print("libpostal disabled -- using built-in address tokenizer")
 
     from recipe import (
         load_recipe, validate_recipe, load_source, filter_population,

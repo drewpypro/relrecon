@@ -44,7 +44,7 @@ The shared normalization module -- everything else depends on this.
 
 **Functions:**
 - `raw(value)` -- passthrough
-- `clean(value)` -- lowercase, strip whitespace, remove trailing punctuation
+- `clean(value)` -- lowercase, strip whitespace, remove commas/periods/semicolons/colons (preserves hyphens, apostrophes, ampersands)
 - `normalized(value, aliases, stopwords)` -- clean + alias replacement + stopword removal
 
 **Unicode handling** (configurable per recipe: `normalize` | `profile_only` | `skip`):

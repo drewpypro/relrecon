@@ -14,6 +14,7 @@ Uses normalize.py for all transformations. Single source of truth.
 
 import json
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Optional
@@ -37,6 +38,27 @@ _ID_PATTERN = re.compile(r'^[A-Za-z]?\d{3,}$')    # Alphanumeric ID-like
 _NAME_SUFFIXES = {"inc", "llc", "ltd", "corp", "co", "group", "pty", "gmbh", "sa", "ag"}
 _ADDR_TOKENS = {"street", "st", "avenue", "ave", "blvd", "boulevard", "drive", "dr",
                 "road", "rd", "lane", "ln", "suite", "ste", "floor", "fl", "pkwy"}
+
+
+def select_columns(df: pl.DataFrame, columns_arg: str | None) -> tuple[list[str], str]:
+    """Resolve --columns arg to a column list. Returns (columns, mode_message)."""
+    if columns_arg and columns_arg.lower() == "auto":
+        columns = [c for c in df.columns if detect_column_type(df[c]) in ("name", "address")]
+        if not columns:
+            columns = [c for c in df.columns if df[c].dtype == pl.String]
+        return columns, f"Auto-selected columns: {', '.join(columns)}"
+    elif columns_arg:
+        columns = [c.strip() for c in columns_arg.split(",")]
+        missing = [c for c in columns if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"Columns not found: {', '.join(missing)}\n"
+                f"Available: {', '.join(df.columns)}"
+            )
+        return columns, ""
+    else:
+        columns = [c for c in df.columns if df[c].dtype == pl.String]
+        return columns, f"Analyzing all string columns: {', '.join(columns)}"
 
 
 def detect_column_type(series: pl.Series) -> str:
@@ -177,29 +199,29 @@ def suggest_stopwords(series: pl.Series, col_type: str = "name",
 # Alias suggestion
 # ---------------------------------------------------------------------------
 
+def _alias_group_key(token: str) -> str:
+    """Strip all non-alnum for grouping (O'Brien/OBrien -> obrien)."""
+    return re.sub(r'[^a-z0-9]', '', token.lower())
+
+
 def suggest_aliases(series: pl.Series, n: int = 30) -> list:
-    """Suggest alias groups by comparing Raw vs Clean token frequencies.
+    """Find punctuation variants (O'Brien/OBrien, AT&T/ATT, Co-Op/Coop).
 
-    Identifies tokens that differ only in case/punctuation and groups them.
-    Does NOT detect semantic aliases (e.g., Blvd/Boulevard, St/Street) --
-    those require a pre-built dictionary or libpostal and are provided
-    via the recipe's alias config, not auto-discovered here.
-
-    Returns:
-        List of {"canonical": str, "variants": list, "total_count": int} dicts
+    Does NOT detect semantic aliases (Blvd/Boulevard) -- those need a dictionary.
     """
     raw_counter = Counter()
     for val in series.drop_nulls().to_list():
         tokens = str(val).split()
         raw_counter.update(tokens)
 
-    # Group by cleaned form
     groups = {}
     for token, count in raw_counter.items():
-        cleaned = clean(token)
-        if cleaned not in groups:
-            groups[cleaned] = []
-        groups[cleaned].append((token, count))
+        key = _alias_group_key(token)
+        if not key:
+            continue
+        if key not in groups:
+            groups[key] = []
+        groups[key].append((token, count))
 
     # Only suggest groups with multiple variants
     aliases = []
@@ -326,6 +348,7 @@ def analyze_dataset(df: pl.DataFrame, columns: list,
     results = {
         "data_quality": data_quality_summary(df, columns),
         "columns": {},
+        "_raw_series": {},
     }
 
     all_stopwords = {}  # Keyed by column type: {"name": set(), "address": set(), ...}
@@ -339,10 +362,9 @@ def analyze_dataset(df: pl.DataFrame, columns: list,
         analysis = analyze_column(df[col], col, col_type=col_type,
                                   unicode_mode=unicode_mode)
         results["columns"][col] = analysis
+        results["_raw_series"][col] = df[col].to_list()
 
-        # Aggregate stopwords by detected type. Known tokens always included,
-        # others must meet the higher aggregation threshold (0.2)
-        # vs the suggestion threshold (0.15) to reduce noise in output config
+        # Aggregate stopwords by type (known always included, others need 0.2+ frequency)
         col_type = analysis["detected_type"]
         if col_type not in all_stopwords:
             all_stopwords[col_type] = set()
@@ -350,8 +372,7 @@ def analyze_dataset(df: pl.DataFrame, columns: list,
             if sw["known"] or sw["frequency"] >= 0.2:
                 all_stopwords[col_type].add(sw["token"])
 
-        # Aggregate aliases. Output format matches normalize.normalized() contract:
-        # {"variant_raw": "canonical_clean"} so normalized() replaces variant with canonical
+        # Aggregate aliases ({"variant_clean": "canonical_stripped"} for normalized())
         for alias in analysis["suggested_aliases"]:
             if len(alias["variants"]) > 1:
                 canonical = alias["canonical"]
@@ -366,7 +387,6 @@ def analyze_dataset(df: pl.DataFrame, columns: list,
     # Write config files if output_dir specified
     if output_dir:
         out = Path(output_dir)
-        out.mkdir(parents=True, exist_ok=True)
 
         with open(out / "stopwords.json", "w") as f:
             json.dump({k: sorted(v) for k, v in all_stopwords.items()}, f, indent=2)
