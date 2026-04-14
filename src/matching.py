@@ -442,10 +442,10 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
     for inherit_cfg in step_config.get("inherit", []):
         src_col = inherit_cfg["source"]
         as_col = inherit_cfg["as"]
-        if src_col in matched.columns:
-            matched = matched.rename({src_col: as_col})
-        elif src_col + "_dst" in matched.columns:
+        if src_col + "_dst" in matched.columns:
             matched = matched.rename({src_col + "_dst": as_col})
+        elif src_col in matched.columns:
+            matched = matched.rename({src_col: as_col})
 
     if collect_rejections:
         return matched, rejections
