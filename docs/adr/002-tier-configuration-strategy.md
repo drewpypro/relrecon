@@ -1,8 +1,8 @@
 # ADR-002: Tier Configuration Strategy
 
-**Status:** Accepted (Option B)
-**Date:** 2026-04-14
-**Context:** Issues #90, #92
+**Status:** Accepted (Option B)  
+**Date:** 2026-04-14  
+
 
 ## Problem
 
