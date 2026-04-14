@@ -329,7 +329,7 @@ def score_address_pair(addr_src: dict, addr_dst: dict,
             continue
 
         # Full string fuzzy score
-        full_score = rfuzz.token_sort_ratio(src_norm, dst_norm) / 100.0
+        full_score = rfuzz.token_sort_ratio(src_norm, dst_norm)
 
         # Parse addresses for street name comparison
         src_parsed = parse_address(src_norm, parser=parser)
@@ -341,8 +341,8 @@ def score_address_pair(addr_src: dict, addr_dst: dict,
             street_score = rfuzz.ratio(
                 src_parsed["street_name"].lower(),
                 dst_parsed["street_name"].lower()
-            ) / 100.0
-            street_match = street_score >= 0.8
+            )
+            street_match = street_score >= 80
 
         # Weighted score: street name boosted
         if street_match:
@@ -351,10 +351,10 @@ def score_address_pair(addr_src: dict, addr_dst: dict,
             weighted = full_score
 
         if weighted > best["best_score"]:
-            best["best_score"] = round(weighted, 3)
+            best["best_score"] = round(weighted, 1)
             best["best_comparison"] = comp_name
             best["street_match"] = street_match
-            best["street_score"] = round(street_score, 3)
+            best["street_score"] = round(street_score, 1)
             best["street_src"] = src_parsed["street_name"]
             best["street_dst"] = dst_parsed["street_name"]
 

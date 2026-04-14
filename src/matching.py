@@ -371,7 +371,7 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
 
         # Enforce threshold if set
         if "threshold" in ac and "addr_score" in matched.columns:
-            cutoff = ac["threshold"] / 100.0  # threshold is 0-100, scores are 0-1
+            cutoff = ac["threshold"]  # both threshold and addr_score are 0-100
             matched = matched.filter(pl.col("addr_score") >= cutoff)
 
     # Add step metadata
