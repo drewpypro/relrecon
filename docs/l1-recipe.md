@@ -32,7 +32,7 @@ The only reliable field for the migrated records is the **child/vendor name (`l3
 | Address | Address1, Address2 | hq_addr1, hq_addr2 |
 
 > [!IMPORTANT]
-> Pop1's parent-level fields were populated with placeholder or incorrect data during migration. The recipe marks these as `invalid_fields` in the population config (currently informational only, see [Issue #74](https://github.com/drewpypro/relational_matching/issues/74)).
+> Pop1's parent-level fields were populated with placeholder or incorrect data during migration. The recipe marks these as `invalid_fields` in the population config (currently informational only, see [Issue #74](https://git.drewpy.pro/drewpypro/relational_matching/issues/74)).
 > The goal is to derive correct L1 by matching L3 names against trusted sources and inheriting the parent relationship.
 
 ## Datasets
@@ -96,10 +96,13 @@ Address matching is **supporting evidence** in all steps, not standalone match c
 **Approach:**
 
 1. **Build variants**: for each record, `addr1_only`, `addr2_only`, `addr_merged` (concatenated)
-2. **Parse**: extract street name (key signal), city, state, zip. Uses libpostal if available, built-in tokenizer otherwise.
-3. **Normalize**: Raw -> Clean -> Normalized (aliases expanded)
-4. **Compare**: merged-to-merged, addr1-to-addr1, addr1-to-addr2, addr2-to-addr1. Best score wins.
-5. **Score**: token overlap % weighted by component. Street name is boosted (60% weight when detected).
+2. **Normalize**: apply tier (raw, clean, or normalized with alias expansion)
+3. **Score (full)**: RapidFuzz token_sort_ratio on the normalized full strings
+4. **Parse**: extract street name using libpostal or built-in tokenizer
+5. **Score (street)**: RapidFuzz ratio on extracted street names, 60/40 weighting when street match detected
+6. **Compare**: all combinations (merged<>merged, addr1<>addr1, addr1<>addr2, etc.). Best weighted score across all tiers and comparisons wins.
+
+See [how-scoring-works.md](how-scoring-works.md) for a detailed walkthrough with worked examples.
 
 **Example:**
 ```

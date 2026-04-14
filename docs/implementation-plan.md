@@ -1,7 +1,7 @@
 # Implementation Plan: L1 Reconciliation Matching Engine
 
 **ADR-001 Status:** Accepted (Option C: Polars + RapidFuzz + optional libpostal)
-**Implementation Status:** All 5 phases complete and merged. 90 tests, 0 warnings. Fuzzy matching (Issue #31) added in PR #34. This document is retained as architectural reference.
+**Implementation Status:** All 5 phases complete and merged. 180 tests. Fuzzy matching, schema validation, run summaries, and many refinements added post-Phase 5 (see PR History). This document is retained as architectural reference.
 
 ---
 
@@ -40,18 +40,18 @@ relational_matching/
 
 ### Phase 1: Foundation (normalize.py)
 
-The shared normalization module — everything else depends on this.
+The shared normalization module -- everything else depends on this.
 
 **Functions:**
-- `raw(value)` — passthrough
-- `clean(value)` — lowercase, strip whitespace, remove trailing punctuation
-- `normalized(value, aliases, stopwords)` — clean + alias replacement + stopword removal
+- `raw(value)` -- passthrough
+- `clean(value)` -- lowercase, strip whitespace, remove trailing punctuation
+- `normalized(value, aliases, stopwords)` -- clean + alias replacement + stopword removal
 
 **Unicode handling** (configurable per recipe: `normalize` | `profile_only` | `skip`):
-- `classify_codepoint(cp, ranges)` — returns bucket name (ascii_alnum, latin, cjk, unknown, etc.)
-- `profile_string(value, ranges)` — bucket counts for a string
-- `profile_column(series, ranges)` — aggregate for a Polars column
-- When mode is `normalize`: replace/remove unknown unicode (not baked into Clean — separate step)
+- `classify_codepoint(cp, ranges)` -- returns bucket name (ascii_alnum, latin, cjk, unknown, etc.)
+- `profile_string(value, ranges)` -- bucket counts for a string
+- `profile_column(series, ranges)` -- aggregate for a Polars column
+- When mode is `normalize`: replace/remove unknown unicode (not baked into Clean -- separate step)
 - When mode is `profile_only`: classify and flag only, no modification
 
 **Deliverable:** Module with tests including unicode edge cases.
@@ -78,9 +78,9 @@ Data profiling that bootstraps normalization config. See [README Signal Analysis
 Two-pass approach with optional libpostal.
 
 **Parser modes** (recipe config: `auto` | `libpostal` | `default`):
-- `auto` — use libpostal if installed, fall back to default
-- `libpostal` — require it, fail if not available
-- `default` — built-in tokenizer, zero external dependencies
+- `auto` -- use libpostal if installed, fall back to default
+- `libpostal` -- require it, fail if not available
+- `default` -- built-in tokenizer, zero external dependencies
 
 **Built-in tokenizer (default mode):**
 
@@ -88,14 +88,18 @@ Uses `config/address_patterns.json` (street suffixes, unit keywords, directional
 
 | Pass | Method | Output |
 |---|---|---|
-| 1 — Token classification | Match tokens against static patterns, infer street name from unmatched tokens before first suffix | Structured components with street name weighted higher |
-| 2 — Fuzzy fallback | RapidFuzz token_sort_ratio on full string | Blunt score, no street weighting |
+| 1 -- Token classification | Match tokens against static patterns, infer street name from unmatched tokens before first suffix | Structured components with street name weighted higher |
+| 2 -- Full-string score | RapidFuzz token_sort_ratio on full address string | Blunt score, no street weighting |
+
+Note: "fuzzy" in address scoring (RapidFuzz on addresses) is unrelated to fuzzy name matching (RapidFuzz cdist on names). Address scoring always uses RapidFuzz regardless of whether the name match was exact or fuzzy.
 
 **Pipeline (both modes):**
-- Merge addr1 + addr2 → build variants (addr1_only, addr2_only, addr_merged)
-- Cross-compare all combinations → best score wins
-- Apply normalization tiers (Raw → Clean → Normalized)
-- Return: best score, comparison/tier that matched, whether street name was identified
+1. Merge addr1 + addr2 → build variants (addr1_only, addr2_only, addr_merged)
+2. For each tier (raw → clean → normalized): normalize, then score full string, then parse for street name
+3. Cross-compare all combinations (merged<>merged, addr1<>addr1, etc.) → best weighted score wins
+4. Return: best score, comparison/tier that matched, whether street name was identified
+
+See [how-scoring-works.md](how-scoring-works.md) for detailed walkthrough.
 
 **Deliverable:** Address scoring module with built-in tokenizer, optional libpostal.
 
@@ -135,13 +139,13 @@ filter:
 - Filter populations (Pop1, Garbage, Pop3) per recipe
 - Date gate on destination records
 - Name matching per step, configurable via recipe:
-  - `method: exact` — Polars joins (Raw then Clean, or any tier combo)
-  - `method: fuzzy` — RapidFuzz `cdist` (full C++ score matrix, no Python loops). Configurable `threshold` (0-100, default 80) and `scorer` (token_sort_ratio, token_set_ratio, ratio, partial_ratio, WRatio)
+  - `method: exact` -- Polars joins (Raw then Clean, or any tier combo)
+  - `method: fuzzy` -- RapidFuzz `cdist` (full C++ score matrix, no Python loops). Configurable `threshold` (0-100, default 80) and `scorer` (token_sort_ratio, token_set_ratio, ratio, partial_ratio, WRatio)
 - Address scoring as supporting evidence (post-match, not a matching method)
 - Multi-match resolution (configurable per recipe):
   - `best_match` (default): prefer earlier step, then highest name_score, then highest addr_score
-  - `all_matches`: return all candidates sorted by score (debug/analysis mode — larger report)
-- Track: which step matched, normalization tier, name score (fuzzy), address score, all validation data
+  - `all_matches`: return all candidates sorted by score (debug/analysis mode -- larger report)
+- Track: which step matched, normalization tier, name score (100 for exact, 0-100 for fuzzy), address score, all validation data
 
 **Deliverable:** Working pipeline that processes synthetic datasets end-to-end.
 
@@ -178,16 +182,16 @@ Phases 2 and 3 can be developed in parallel after Phase 1.
 | # | Topic | Decision |
 |---|---|---|
 | 1 | libpostal dependency | Optional, auto-detected. Built-in tokenizer is default. Recipe config: `auto` / `libpostal` / `default`. See [libpostal install guide](#libpostal-installation) below. |
-| 2 | Unicode handling | Configurable per recipe (`normalize` / `profile_only` / `skip`). Separate from Clean tier — only unknown/problematic unicode is replaced, not lumped into Clean. |
-| 3 | Multi-match resolution | Configurable per recipe: `best_match` (default — prefer core_parent, then highest score) or `all_matches` (show all candidates, sorted by score — useful for analysis/debugging). |
-| 4 | Recipe validation | Fail on missing required columns, warn on optional. All YAML configs validated against JSON Schema (`config/recipe_schema.json`). Schema covers recipes, signal analysis config, and any future YAML configs — single schema with per-type definitions. Usable for linting in CI/automated workflows. |
+| 2 | Unicode handling | Configurable per recipe (`normalize` / `profile_only` / `skip`). Separate from Clean tier -- only unknown/problematic unicode is replaced, not lumped into Clean. |
+| 3 | Multi-match resolution | Configurable per recipe: `best_match` (default -- prefer core_parent, then highest score) or `all_matches` (show all candidates, sorted by score -- useful for analysis/debugging). |
+| 4 | Recipe validation | Fail on missing required columns, warn on optional. All YAML configs validated against JSON Schema (`config/recipe_schema.json`). Schema covers recipes, signal analysis config, and any future YAML configs -- single schema with per-type definitions. Usable for linting in CI/automated workflows. |
 | 5 | Input formats | Support CSV, Parquet, and any Polars-supported format. Configured per source in recipe. |
 
 ---
 
 ## Open Questions
 
-_None currently — all resolved. New questions will be tracked as GitHub/Gitea issues._
+_None currently -- all resolved. New questions will be tracked as GitHub/Gitea issues._
 
 ---
 
@@ -206,7 +210,7 @@ sudo apt-get install -y curl autoconf automake libtool pkg-config
 git clone https://github.com/openvenues/libpostal
 cd libpostal
 ./bootstrap.sh
-# Use a persistent path 
+# Use a persistent path -- do NOT use /tmp (data won't survive reboots)
 ./configure --datadir=/usr/local/share/libpostal
 make -j$(nproc)
 sudo make install
@@ -238,3 +242,34 @@ print(f"libpostal available: {LIBPOSTAL_AVAILABLE}")  # True if installed
 Or set `parser: libpostal` in the recipe to require it (fails if not installed).
 
 ---
+
+## PR History
+
+| PR | Phase | Description | Status |
+|---|---|---|---|
+| #8 | -- | Implementation plan | Merged |
+| #9 | 1 | normalize.py + unicode_ranges.json + tests | Merged |
+| #10 | 2 | signal_analysis.py + config generation + tests | Merged |
+| #11 | 3 | address.py + address_patterns.json + tests | Merged |
+| #13 | 4 | matching.py + recipe.py + l1_reconciliation.yaml + tests | Merged |
+| #14 | 5 | report.py + Excel output + tests | Merged |
+| #15 | -- | CLI entry point (`python3 -m src`) | Merged |
+| #16 | -- | clean() punctuation fix | Merged |
+| #17 | -- | Report destination address columns | Merged |
+| #18 | -- | requirements.txt, CSV dedup, test warnings (63 total, 0 warnings) |
+| #22 | -- | fix: coalesce variant dest columns in all_matches mode |
+| #26 | -- | feat: semantic recipe validation + enhanced --dry-run |
+| #27 | -- | feat: recipe-driven report column mapping (output.columns in recipe) |
+| #30 | -- | fix: force string inference for CSV loading (infer_schema_length=0) |
+| #33 | -- | fix: normalization config path resolution + name stopwords |
+| #34 | -- | feat: fuzzy name matching (cdist, recipe-configurable) + script defaults (90 tests) | Merged |
+| #56 | -- | fix: dedup on record_key instead of match field | Merged |
+| #58 | -- | fix: addr_score normalized to 0-100, name_score coloring | Merged |
+| #59 | -- | feat: generic step filters replacing date_gate (backward compatible) | Merged |
+| #62 | -- | feat: enriched analysis tab with reason codes | Merged |
+| #64 | -- | feat: pipeline timing per phase + CLI cleanup | Merged |
+| #65 | -- | fix: inherit prefers _dst suffix columns | Merged |
+| #67 | -- | feat: JSON Schema validation for recipes (additionalProperties: false) | Merged |
+| #68 | -- | docs: filter ops reference (standard vs special ops) | Merged |
+| #69 | -- | feat: run summary -- Excel Summary tab + markdown output | Merged |
+| #70 | -- | feat: Mermaid cascade diagram in summary + --mermaid CLI flag | Merged |

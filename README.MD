@@ -159,6 +159,7 @@ Signal analysis is a **separate profiling step** that does not run as part of th
 | **[ADR-001](docs/adr/001-matching-engine-tooling.md)** | Why Polars + RapidFuzz + libpostal (four options benchmarked) |
 | **[Implementation Plan](docs/implementation-plan.md)** | Build phases, technical decisions, PR history, libpostal install guide |
 | **[Filter Ops Reference](docs/filter-ops.md)** | Standard and special filter ops, population vs step filters, how to extend |
+| **[How Scoring Works](docs/how-scoring-works.md)** | Name and address scoring: methods, tiers, worked example, report columns |
 
 ## License
 
