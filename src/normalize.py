@@ -3,7 +3,7 @@ Shared normalization module for the relational matching framework.
 
 Provides three normalization tiers (Raw, Clean, Normalized) and
 unicode profiling/normalization. Used by both signal analysis and
-the matching engine -- single source of truth.
+the matching engine. Single source of truth.
 
 Unicode handling is configurable: normalize | profile_only | skip
 """
@@ -158,7 +158,7 @@ def normalize_unicode(value: str) -> str:
     - Compatibility decomposition (ligatures, etc.)
 
     Does NOT strip combining marks (accents are preserved).
-    Does NOT remove unknown codepoints (emoji, symbols) -- that's a
+    Does NOT remove unknown codepoints (emoji, symbols). That's a
     recipe-level decision handled by signal analysis + profile_only mode.
     """
     # NFKC handles fullwidth -> ASCII and compatibility forms
@@ -198,7 +198,7 @@ def clean(value: str) -> str:
     Removes all commas, periods, semicolons, and colons from the string
     so that formatting differences (e.g., 'Vanteon Systems, Inc.' vs
     'VANTEON SYSTEMS INC') do not block exact matching.
-    Does NOT include unicode normalization -- that's a separate step.
+    Does NOT include unicode normalization. That's a separate step.
     """
     if value is None:
         return ""
@@ -214,7 +214,7 @@ def normalized(value: str, aliases: Optional[dict | list] = None,
                stopwords: Optional[set | list] = None) -> str:
     """Normalized tier: clean + alias replacement + stopword removal.
 
-    Used for addresses only -- never for names.
+    Used for addresses only, never for names.
     Accepts aliases as a dict (compiled on the fly) or a pre-compiled list
     from compile_aliases() for performance at scale.
     Accepts stopwords as a list or pre-built set/frozenset.
@@ -233,7 +233,7 @@ def normalized(value: str, aliases: Optional[dict | list] = None,
                 s = pattern.sub(replacement, s)
 
     if stopwords:
-        # .lower() on both sides is intentional -- stopword config may have mixed case
+        # .lower() on both sides is intentional. Stopword config may have mixed case
         sw_set = stopwords if isinstance(stopwords, (set, frozenset)) else {sw.lower() for sw in stopwords}
         tokens = s.split()
         tokens = [t for t in tokens if t.lower() not in sw_set]

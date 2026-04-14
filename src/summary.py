@@ -96,7 +96,7 @@ def generate_summary(recipe: dict, stats: dict, matched_df: pl.DataFrame,
         stats: Pipeline stats dict (total_source, matched_count, unmatched_count)
         matched_df: The matched DataFrame (for per-step counts)
         timing: Optional pipeline timing dict (load, setup, match, resolve)
-        mermaid: Mermaid diagram mode -- "default", "detailed", or "disabled"
+        mermaid: Mermaid diagram mode. "default", "detailed", or "disabled"
 
     Returns:
         Markdown string
@@ -267,7 +267,7 @@ def generate_mermaid(recipe: dict, stats: dict, matched_df: pl.DataFrame | None 
     lines.append(f"    U[Unmatched: {unmatched_total}]")
     lines.append("")
 
-    # Connections -- cascade flow
+    # Connections (cascade flow)
     remaining = total
 
     for i, step in enumerate(steps):

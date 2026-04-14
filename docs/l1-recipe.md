@@ -1,0 +1,149 @@
+# The First Recipe: L1 Reconciliation
+
+Everything below describes the **first recipe** built on this framework: the real-world problem that motivated building it. The framework itself (normalization, signal analysis, matching engine, reporting) is reusable. Only the recipe config changes between use cases.
+
+## The Problem
+
+A large population of vendor records (~15k rows, 232 columns) was migrated into a source-of-record system over the past decade. During migration, parent-child relationships broke:
+
+- **Parent IDs (`tpty_l1_id`)** were populated with placeholder or incorrect values
+- **Parent names (`l1_fmly_nm`)** don't match the actual parent entities
+- **Contract dates (`cntrct_cmpl_dt`)** are invalid for the migrated population
+
+The only reliable field for the migrated records is the **child/vendor name (`l3_fmly_nm`)**. The goal: use that name to find the correct parent by matching against trusted sources and inheriting the real parent relationship.
+
+## Terminology
+
+| Term | Meaning |
+|---|---|
+| **L1** | Parent level (Supplier). What we're trying to derive. |
+| **L3** | Child/Vendor level. The name we match on. |
+| **Pop1** | Target population. Migrated records with broken L1 fields (vendor_id starts with V7) |
+| **Pop3** | Valid population. Remaining records from same dataset, not guaranteed clean |
+| **core_parent** | Trusted reference dataset with reliable L1-L3 relationships |
+| **Date gate** | A filter that excludes destination records older than 2 years |
+
+## Field Mapping
+
+| Level | core_parent_export | tp_multi_pop_dataset |
+|---|---|---|
+| L3 (Child/Vendor) | Vendor Name, Vendor ID | l3_fmly_nm, vendor_id |
+| L1 (Parent/Supplier) | Supplier Name, Supplier ID | l1_fmly_nm, tpty_l1_id |
+| Address | Address1, Address2 | hq_addr1, hq_addr2 |
+
+> [!IMPORTANT]
+> Pop1's parent-level fields were populated with placeholder or incorrect data during migration. The recipe marks these as `invalid_fields` in the population config (currently informational only, see [Issue #74](https://github.com/drewpypro/relational_matching/issues/74)).
+> The goal is to derive correct L1 by matching L3 names against trusted sources and inheriting the parent relationship.
+
+## Datasets
+
+**core_parent_export.csv** (Trusted Reference)
+- Master vendor/supplier database with recent, trusted data
+- Key columns: Updated (date), Vendor Name/ID (L3), Supplier Name/ID (L1), Address1/Address2
+
+**tp_multi_pop_dataset.csv** (Multi-Population Source)
+- Contains 3 populations in one file, separated by filter logic:
+
+| Population | Filter | Description |
+|---|---|---|
+| Pop1 (target) | `vendor_id LIKE V7%` | Target for reconciliation. Invalid L1 fields |
+| Garbage | non-V7 + `data_entry_type = 'Migrated'` + `rq_intk_user` contains "Data Migration" or "Goblindor" | Excluded from matching |
+| Pop3 (valid) | Everything remaining | Valid records from real users, not guaranteed clean |
+
+> [!CAUTION]
+> Pop3 may still contain data quality issues. It simply passed the garbage filter. This is why exact name matching is required rather than trusting Pop3 fields at face value.
+
+<details>
+<summary><b>Key Column Details</b></summary>
+
+- **l3_fmly_nm**: Child/Vendor name. The primary matching field.
+- **tpty_assm_nm**: Infosec assessment third-party name. Better data quality when populated. Always included in report output for manual review.
+- **cntrct_cmpl_dt**: Contract completion date. Invalid for Pop1. Used for 2-year recency on destination records only.
+- **hq_addr1, hq_addr2**: Address fields. Mixed quality. Data may be in either column, split across both or abbreviated.
+- **data_entry_type**: `Migrated` (from another system) or `net_new` (generated through normal business processes).
+- **rq_intk_user**: Identifies automated migrations (Data Migration, Goblindor) vs. normal users.
+- **Other columns** (timestamp, cntrc_expt, obgr_mgr_ext, tep_dgr, ogr_mdi): informational only, not used for matching.
+
+</details>
+
+## Context
+
+- Data migration between systems is a normal process, but over the past decade, large migrations occurred under time pressure with inadequate tooling
+- As migrations progressed they improved, but early batches lacked reconciliation back to trusted records. Some fields were populated with best-effort or placeholder values
+- Pop1 records (all V7* vendor IDs) were migrated by Data Migration or Goblindor users with invalid `l1_fmly_nm`, `tpty_l1_id`, and `cntrct_cmpl_dt`
+
+## Matching Flow
+
+**Step 1: Pop1 -> core_parent.** Match `l3_fmly_nm` to `Vendor Name` (Raw/Clean exact). On match, inherit L1 (Supplier Name/ID). Destination `Updated` must be within 2 years.
+
+**Step 2: Pop1 -> Pop3.** Match `l3_fmly_nm` to `l3_fmly_nm` (Raw/Clean exact). On match, inherit `tpty_l1_id`/`l1_fmly_nm`. Pop3's `cntrct_cmpl_dt` must be within 2 years.
+
+**Step 3: Fuzzy Pop1 -> core_parent.** Same as Step 1 but with RapidFuzz `token_sort_ratio` at threshold 70.
+
+**Step 4: Fuzzy Pop1 -> Pop3.** Same as Step 2 but fuzzy at threshold 70.
+
+All steps run against **all** Pop1 records. In `best_match` mode (default), earlier steps win when multiple steps match the same record. Use `all_matches` mode in the recipe to see all candidates for analysis.
+
+Address matching is **supporting evidence** in all steps, not standalone match criteria.
+
+### Address Matching
+
+<details>
+<summary><b>How address matching works (detailed walkthrough)</b></summary>
+
+**Problem:** Address data is split unpredictably across two columns. We can't trust which column holds what.
+
+**Approach:**
+
+1. **Build variants**: for each record, `addr1_only`, `addr2_only`, `addr_merged` (concatenated)
+2. **Parse**: extract street name (key signal), city, state, zip. Uses libpostal if available, built-in tokenizer otherwise.
+3. **Normalize**: Raw -> Clean -> Normalized (aliases expanded)
+4. **Compare**: merged-to-merged, addr1-to-addr1, addr1-to-addr2, addr2-to-addr1. Best score wins.
+5. **Score**: token overlap % weighted by component. Street name is boosted (60% weight when detected).
+
+**Example:**
+```
+Pop1:  "194 6th Avenue Floor 7"        -> street: 6th Avenue
+Core:  "194 6TH AVENUE FL 7 NY 10005"  -> street: 6th Avenue
+
+Street match: 100% | Token overlap: 67% | Weighted: ~85%
+```
+
+**Key insight:** 60% overall + street match = strong signal. 90% overall with no street match = suspicious (matching on city/state/zip only).
+
+</details>
+
+### Date Rules
+
+- 2-year recency window applies to **destination records only**:
+    - core_parent: `Updated` must be within 2 years
+    - Pop3: `cntrct_cmpl_dt` must be within 2 years
+- Pop1's `cntrct_cmpl_dt` is invalid and is NOT checked
+
+## Output Report
+
+Excel workbook with three tabs:
+
+- **Summary**: recipe config, population descriptions, per-step match counts, cascade explanation, pipeline timing
+- **Matched**: source/destination L3 names (side-by-side), derived L1 ID + Name, match source, match tier, address scores with source and destination addresses and `tpty_assm_nm` for review
+- **Analysis**: unmatched Pop1 records with reason codes for human review
+
+A markdown summary (`_summary.md`) is also generated alongside the Excel file with the same information plus a Mermaid cascade diagram.
+
+## Name Normalization Note
+
+> [!IMPORTANT]
+> **For this recipe, names should not be normalized.** Suffixes like Inc/Ltd/Pty Ltd distinguish different entities and L1 parents in this dataset.
+> Example: "Armitage Solutions Pty Ltd" (V562841 -> S07589) vs "Armitage Solutions Ltd" (V562900 -> S07601) are **different L1 parents** that normalization would incorrectly merge.
+> Other recipes may benefit from name normalization. Add `normalized` to the `tiers` list in the recipe's match_fields to enable it. The choice is recipe-specific.
+
+## Constraints
+
+- **Dataset is global**: addresses span multiple countries/formats (not US-only)
+- Must handle hierarchical relationships (L1 to L3, vendor to parent)
+- Address field quality varies (addr2 unreliable); prioritize addr1
+- 2-year recency window on destination records only (Pop1 dates are invalid)
+- Must distinguish between 3 populations in the multi-pop dataset
+- Pop3 is not guaranteed clean. Exact matching required
+- Report must be auditable (show *why* each match fired)
+- Must run on local developer hardware (HP ZBook: Ryzen 9 PRO 7940HS 8-core, 64GB RAM)
