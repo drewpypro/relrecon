@@ -28,16 +28,81 @@ def load_recipe(path: str) -> dict:
         if p.suffix in (".yaml", ".yml"):
             if not YAML_AVAILABLE:
                 raise ImportError("PyYAML required for YAML recipes: pip install pyyaml")
-            recipe = yaml.safe_load(f)
+            try:
+                recipe = yaml.safe_load(f)
+            except yaml.YAMLError as exc:
+                # Extract line/column from PyYAML's error marks
+                msg = f"YAML syntax error in {path}"
+                if hasattr(exc, "problem_mark") and exc.problem_mark:
+                    mark = exc.problem_mark
+                    msg += f" (line {mark.line + 1}, column {mark.column + 1})"
+                if hasattr(exc, "problem") and exc.problem:
+                    msg += f": {exc.problem}"
+                msg += (
+                    "\n\nThis is usually caused by a tab character or "
+                    "incorrect indentation. YAML requires spaces, not tabs."
+                )
+                raise ValueError(msg) from None
         else:
             recipe = json.load(f)
 
-    validate_recipe(recipe)
+    schema_warnings = validate_recipe(recipe)
+    if schema_warnings:
+        import sys
+        for w in schema_warnings:
+            print(f"[WARN] {w}", file=sys.stderr)
     return recipe
 
 
-def validate_recipe(recipe: dict) -> None:
-    """Validate recipe structure. Raises ValueError on problems."""
+# ---------------------------------------------------------------------------
+# JSON Schema validation
+# ---------------------------------------------------------------------------
+
+def _load_recipe_schema() -> dict:
+    """Load the recipe JSON Schema from config/recipe_schema.json."""
+    schema_path = Path(__file__).resolve().parent.parent / "config" / "recipe_schema.json"
+    if not schema_path.exists():
+        return {}  # Gracefully degrade if schema file missing
+    with open(schema_path) as f:
+        return json.load(f)
+
+
+def validate_recipe(recipe: dict) -> list[str]:
+    """Validate recipe against JSON Schema + additional semantic checks.
+
+    Raises ValueError for critical structural errors (missing required
+    fields, wrong types).
+    Returns a list of non-fatal warnings (unrecognized keys, missing
+    record_key, etc.).
+    """
+    warnings: list[str] = []
+
+    # --- JSON Schema validation ---
+    schema = _load_recipe_schema()
+    if schema:
+        try:
+            from jsonschema import Draft7Validator
+        except ImportError:
+            warnings.append(
+                "jsonschema not installed — schema validation skipped. "
+                "Install with: pip install jsonschema"
+            )
+        else:
+            validator = Draft7Validator(schema)
+            errors = sorted(validator.iter_errors(recipe), key=lambda e: list(e.path))
+            schema_errors = []
+            for err in errors:
+                path = err.json_path or "$"
+                # additionalProperties violations are warnings (typos, indent bugs)
+                if err.validator == "additionalProperties":
+                    warnings.append(f"{path}: {err.message}")
+                else:
+                    schema_errors.append(f"{path}: {err.message}")
+            if schema_errors:
+                detail = "\n  ".join(schema_errors)
+                raise ValueError(f"Recipe schema validation failed:\n  {detail}")
+
+    # --- Legacy structural checks (fallback for environments without jsonschema) ---
     required = ["name", "sources", "populations", "steps", "output"]
     missing = [k for k in required if k not in recipe]
     if missing:
@@ -55,23 +120,21 @@ def validate_recipe(recipe: dict) -> None:
     if "format" not in recipe["output"]:
         raise ValueError("Output missing 'format' field")
 
-    # Warn if a source population used in steps is missing record_key.
-    # Only check populations that appear as a step source (not destinations
-    # like pop3, not excluded populations like garbage).
+    # --- Semantic warnings ---
     source_pops = {step["source"] for step in recipe.get("steps", [])}
     for pop_name in source_pops:
         pop_cfg = recipe.get("populations", {}).get(pop_name, {})
         if pop_cfg.get("action") == "exclude":
             continue
         if "record_key" not in pop_cfg:
-            import sys
-            print(
-                f'[WARN] Population "{pop_name}" has no record_key. '
+            warnings.append(
+                f'Population "{pop_name}" has no record_key. '
                 "Dedup will fall back to match field — records with "
                 "duplicate names may be collapsed. Set record_key to the "
-                "field that uniquely identifies each source record.",
-                file=sys.stderr,
+                "field that uniquely identifies each source record."
             )
+
+    return warnings
 
 
 def load_source(source_config: dict, base_dir: str = ".") -> pl.DataFrame:
@@ -314,8 +377,11 @@ def format_validation_summary(
     populations: dict[str, dict],
     errors: list[str],
     warnings: list[str],
+    schema_warnings: list[str] | None = None,
 ) -> str:
     """Format a human-readable validation summary for --dry-run."""
+    if schema_warnings:
+        warnings = list(warnings) + schema_warnings
     lines = []
     lines.append(f"Recipe: {recipe.get('name', 'unnamed')}")
     lines.append(f"Schema: ✅ valid")
