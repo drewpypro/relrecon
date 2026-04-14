@@ -77,14 +77,15 @@ def main() -> int:
 
     # Load and validate recipe
     print(f"Loading recipe: {recipe_path}")
-    recipe = load_recipe(str(recipe_path))
-
-    errors = validate_recipe(recipe)
-    if errors:
-        print("Recipe validation errors:", file=sys.stderr)
-        for err in errors:
-            print(f"  - {err}", file=sys.stderr)
+    try:
+        recipe = load_recipe(str(recipe_path))
+    except (ValueError, FileNotFoundError) as e:
+        print(f"\nError: {e}", file=sys.stderr)
         return 1
+
+    # load_recipe already ran validate_recipe (raises on errors).
+    # Call again to capture schema warnings for dry-run display.
+    schema_warnings = validate_recipe(recipe)
 
     print(f"Recipe: {recipe.get('name', 'unnamed')}")
     print(f"Data directory: {data_dir}")
@@ -145,7 +146,7 @@ def main() -> int:
             pop_data["df"] = remainder
 
         val_errors, val_warnings = validate_fields(recipe, sources, populations)
-        summary = format_validation_summary(recipe, sources, populations, val_errors, val_warnings)
+        summary = format_validation_summary(recipe, sources, populations, val_errors, val_warnings, schema_warnings)
         print(summary)
         return 1 if val_errors else 0
 

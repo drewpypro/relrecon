@@ -4,6 +4,7 @@ rapidfuzz
 numpy
 openpyxl
 pyyaml
+jsonschema
 
 # Optional: international address parsing (better accuracy, requires C library)
 # Install libpostal first: see docs/implementation-plan.md#libpostal-installation

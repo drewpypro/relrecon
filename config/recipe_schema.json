@@ -1,9 +1,10 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Relational Matching Recipe Schema",
-  "description": "JSON Schema for validating recipe YAML configs. Usable for linting in CI/automated workflows.",
+  "description": "JSON Schema for validating recipe YAML configs. Usable for linting in CI/automated workflows. All object levels use additionalProperties: false to catch typos and YAML indent mistakes.",
   "type": "object",
   "required": ["name", "sources", "populations", "steps", "output"],
+  "additionalProperties": false,
   "properties": {
     "name": {
       "type": "string",
@@ -16,7 +17,8 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": ["file", "type"],
+        "required": ["file"],
+        "additionalProperties": false,
         "properties": {
           "file": {
             "type": "string",
@@ -24,7 +26,8 @@
           },
           "type": {
             "type": "string",
-            "enum": ["trusted_reference", "multi_population"]
+            "enum": ["trusted_reference", "multi_population"],
+            "description": "Source type label (informational)"
           }
         }
       }
@@ -34,30 +37,17 @@
       "additionalProperties": {
         "type": "object",
         "required": ["source"],
+        "additionalProperties": false,
         "properties": {
           "source": { "type": "string" },
+          "record_key": {
+            "type": "string",
+            "description": "Field that uniquely identifies each source record. Used for dedup in best_match mode. If omitted, dedup falls back to match field (may collapse records with duplicate names)."
+          },
           "filter": {
             "type": "array",
             "items": {
-              "type": "object",
-              "required": ["field", "op"],
-              "properties": {
-                "field": { "type": "string" },
-                "op": {
-                  "type": "string",
-                  "enum": ["eq", "neq", "starts_with", "not_starts_with", "contains", "contains_any"]
-                },
-                "value": { "type": "string" },
-                "values": {
-                  "type": "array",
-                  "items": { "type": "string" }
-                },
-                "join": {
-                  "type": "string",
-                  "enum": ["and", "or"],
-                  "default": "and"
-                }
-              }
+              "$ref": "#/definitions/filter_condition"
             }
           },
           "action": {
@@ -66,7 +56,8 @@
           },
           "invalid_fields": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": { "type": "string" },
+            "description": "Fields in this population known to contain invalid/unreliable data. Informational — not used for matching logic."
           }
         }
       }
@@ -76,15 +67,23 @@
       "items": {
         "type": "object",
         "required": ["name", "source", "destination", "match_fields"],
+        "additionalProperties": false,
         "properties": {
           "name": { "type": "string" },
-          "source": { "type": "string" },
-          "destination": { "type": "string" },
+          "source": {
+            "type": "string",
+            "description": "Population name to match from"
+          },
+          "destination": {
+            "type": "string",
+            "description": "Population or source name to match against"
+          },
           "match_fields": {
             "type": "array",
             "items": {
               "type": "object",
               "required": ["source", "destination", "method", "tiers"],
+              "additionalProperties": false,
               "properties": {
                 "source": { "type": "string" },
                 "destination": { "type": "string" },
@@ -117,6 +116,7 @@
           },
           "address_support": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
               "source": {
                 "type": "array",
@@ -134,13 +134,16 @@
               "threshold": {
                 "type": "number",
                 "minimum": 0,
-                "maximum": 100
+                "maximum": 100,
+                "description": "Minimum address score to keep a match. Records below this cascade to later steps."
               }
             }
           },
           "date_gate": {
             "type": "object",
             "required": ["field", "max_age_years", "applies_to"],
+            "additionalProperties": false,
+            "description": "Legacy date recency filter. Prefer 'filters' with op: max_age_years instead. Both are supported — date_gate is internally converted to a filter.",
             "properties": {
               "field": { "type": "string" },
               "max_age_years": { "type": "number" },
@@ -150,14 +153,28 @@
               }
             }
           },
+          "filters": {
+            "type": "array",
+            "description": "Generic step-level filters applied before matching. Supports all population filter ops plus max_age_years.",
+            "items": {
+              "$ref": "#/definitions/step_filter_condition"
+            }
+          },
           "inherit": {
             "type": "array",
             "items": {
               "type": "object",
               "required": ["source", "as"],
+              "additionalProperties": false,
               "properties": {
-                "source": { "type": "string" },
-                "as": { "type": "string" }
+                "source": {
+                  "type": "string",
+                  "description": "Destination column to inherit on match"
+                },
+                "as": {
+                  "type": "string",
+                  "description": "Column name in output for the inherited value"
+                }
               }
             }
           }
@@ -166,13 +183,17 @@
     },
     "output": {
       "type": "object",
-      "required": ["format", "path"],
+      "required": ["format"],
+      "additionalProperties": false,
       "properties": {
         "format": {
           "type": "string",
           "enum": ["xlsx", "csv", "parquet"]
         },
-        "path": { "type": "string" },
+        "path": {
+          "type": "string",
+          "description": "Output path hint. CLI overrides this with a timestamped filename."
+        },
         "match_mode": {
           "type": "string",
           "enum": ["best_match", "all_matches"],
@@ -183,6 +204,7 @@
           "items": {
             "type": "object",
             "required": ["name", "type"],
+            "additionalProperties": false,
             "properties": {
               "name": { "type": "string" },
               "type": {
@@ -194,6 +216,7 @@
         },
         "columns": {
           "type": "object",
+          "additionalProperties": false,
           "description": "Report column definitions. When omitted, hardcoded defaults are used (backward compatible).",
           "properties": {
             "matched": {
@@ -242,6 +265,7 @@
               "items": {
                 "type": "object",
                 "required": ["field", "header"],
+                "additionalProperties": false,
                 "properties": {
                   "field": { "type": "string" },
                   "header": { "type": "string" }
@@ -254,11 +278,13 @@
     },
     "normalization": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "stopwords": { "type": "string" },
         "aliases": { "type": "string" },
         "unicode": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "ranges": { "type": "string" },
             "mode": {
@@ -267,6 +293,65 @@
               "default": "skip"
             }
           }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "filter_condition": {
+      "type": "object",
+      "required": ["field", "op"],
+      "additionalProperties": false,
+      "properties": {
+        "field": { "type": "string" },
+        "op": {
+          "type": "string",
+          "enum": ["eq", "neq", "starts_with", "not_starts_with", "contains", "contains_any"]
+        },
+        "value": { "type": "string" },
+        "values": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "join": {
+          "type": "string",
+          "enum": ["and", "or"],
+          "default": "and"
+        }
+      }
+    },
+    "step_filter_condition": {
+      "type": "object",
+      "required": ["field", "op"],
+      "additionalProperties": false,
+      "description": "Step-level filter. Supports all population filter ops plus max_age_years for date recency.",
+      "properties": {
+        "field": { "type": "string" },
+        "op": {
+          "type": "string",
+          "enum": ["eq", "neq", "starts_with", "not_starts_with", "contains", "contains_any", "max_age_years"]
+        },
+        "value": {
+          "description": "Filter value. String for text ops, number for max_age_years."
+        },
+        "values": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "join": {
+          "type": "string",
+          "enum": ["and", "or"],
+          "default": "and"
+        },
+        "applies_to": {
+          "type": "string",
+          "enum": ["destination", "source", "both"],
+          "default": "destination",
+          "description": "Which side of the match to apply the filter to."
+        },
+        "max_age_years": {
+          "type": "number",
+          "description": "Legacy field — prefer using op: max_age_years with value instead."
         }
       }
     }

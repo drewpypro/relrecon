@@ -1,0 +1,253 @@
+"""Tests for JSON Schema-based recipe validation (Issue #61)."""
+
+import copy
+import pytest
+from pathlib import Path
+
+from src.recipe import validate_recipe
+
+# Minimal valid recipe
+_BASE = {
+    "name": "test",
+    "sources": {"src": {"file": "test.csv", "type": "trusted_reference"}},
+    "populations": {
+        "pop1": {"source": "src", "record_key": "id"},
+    },
+    "steps": [
+        {
+            "name": "step1",
+            "source": "pop1",
+            "destination": "src",
+            "match_fields": [
+                {"source": "name", "destination": "name", "method": "exact", "tiers": ["raw"]}
+            ],
+        }
+    ],
+    "output": {"format": "xlsx"},
+}
+
+
+def _make(**overrides):
+    r = copy.deepcopy(_BASE)
+    r.update(overrides)
+    return r
+
+
+# ---------------------------------------------------------------------------
+# Clean recipes produce no warnings
+# ---------------------------------------------------------------------------
+
+class TestCleanRecipes:
+    def test_minimal_valid(self):
+        assert validate_recipe(_make()) == []
+
+    def test_all_optional_fields(self):
+        """Recipe with every optional field should still be clean."""
+        r = _make(
+            description="test desc",
+            normalization={"stopwords": "x.json", "aliases": "y.json", "unicode": {"ranges": "z.json", "mode": "skip"}},
+        )
+        r["steps"][0]["address_support"] = {
+            "source": ["a1"], "destination": ["a2"], "parser": "auto", "threshold": 60,
+        }
+        r["steps"][0]["date_gate"] = {"field": "dt", "max_age_years": 2, "applies_to": "destination"}
+        r["steps"][0]["filters"] = [
+            {"field": "x", "op": "eq", "value": "1", "applies_to": "destination"}
+        ]
+        r["steps"][0]["inherit"] = [{"source": "col1", "as": "new_col"}]
+        r["output"]["match_mode"] = "best_match"
+        r["output"]["path"] = "out.xlsx"
+        r["output"]["tabs"] = [{"name": "Matched", "type": "matched_records"}]
+        r["output"]["columns"] = {
+            "matched": [{"field": "name", "header": "Name"}],
+            "analysis": [{"field": "name", "header": "Name"}],
+        }
+        assert validate_recipe(r) == []
+
+    def test_l1_recipe(self):
+        """The real L1 recipe should validate clean."""
+        import yaml
+        recipe_path = Path(__file__).parent.parent / "config" / "recipes" / "l1_reconciliation.yaml"
+        if not recipe_path.exists():
+            pytest.skip("L1 recipe not found")
+        with open(recipe_path) as f:
+            recipe = yaml.safe_load(f)
+        warnings = validate_recipe(recipe)
+        # Filter out record_key warnings (pop3 intentionally lacks it)
+        schema_warnings = [w for w in warnings if "record_key" not in w]
+        assert schema_warnings == [], f"L1 recipe has unexpected schema warnings: {schema_warnings}"
+
+
+# ---------------------------------------------------------------------------
+# Unrecognized keys caught as warnings (additionalProperties: false)
+# ---------------------------------------------------------------------------
+
+class TestUnrecognizedKeys:
+    def test_root_typo(self):
+        r = _make(debugg=True)
+        warnings = validate_recipe(r)
+        assert any("debugg" in w for w in warnings)
+
+    def test_root_typo_soruces(self):
+        r = _make()
+        r["soruces"] = {"x": {"file": "x.csv"}}
+        warnings = validate_recipe(r)
+        assert any("soruces" in w for w in warnings)
+
+    def test_source_unknown_key(self):
+        r = _make()
+        r["sources"]["src"]["encoding"] = "utf-8"
+        warnings = validate_recipe(r)
+        assert any("encoding" in w for w in warnings)
+
+    def test_population_unknown_key(self):
+        r = _make()
+        r["populations"]["pop1"]["dedup"] = True
+        warnings = validate_recipe(r)
+        assert any("dedup" in w for w in warnings)
+
+    def test_step_unknown_key(self):
+        r = _make()
+        r["steps"][0]["weighting"] = 0.5
+        warnings = validate_recipe(r)
+        assert any("weighting" in w for w in warnings)
+
+    def test_match_field_unknown_key(self):
+        r = _make()
+        r["steps"][0]["match_fields"][0]["case_insensitive"] = True
+        warnings = validate_recipe(r)
+        assert any("case_insensitive" in w for w in warnings)
+
+    def test_address_support_unknown_key(self):
+        r = _make()
+        r["steps"][0]["address_support"] = {
+            "source": ["a"], "destination": ["b"], "fuzzy": True,
+        }
+        warnings = validate_recipe(r)
+        assert any("fuzzy" in w for w in warnings)
+
+    def test_date_gate_unknown_key(self):
+        r = _make()
+        r["steps"][0]["date_gate"] = {"field": "dt", "max_age_years": 1, "applies_to": "destination", "format": "%Y"}
+        warnings = validate_recipe(r)
+        assert any("format" in w for w in warnings)
+
+    def test_inherit_unknown_key(self):
+        r = _make()
+        r["steps"][0]["inherit"] = [{"source": "x", "as": "y", "default": "N/A"}]
+        warnings = validate_recipe(r)
+        assert any("default" in w for w in warnings)
+
+    def test_output_unknown_key(self):
+        r = _make()
+        r["output"]["sheet_name"] = "Results"
+        warnings = validate_recipe(r)
+        assert any("sheet_name" in w for w in warnings)
+
+    def test_normalization_unknown_key(self):
+        r = _make(normalization={"stopwords": "x.json", "case_fold": True})
+        warnings = validate_recipe(r)
+        assert any("case_fold" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# YAML indent bug detection (the original motivation for #61)
+# ---------------------------------------------------------------------------
+
+class TestIndentBugs:
+    def test_filter_on_step_instead_of_population(self):
+        """'filter' (singular) is a population key, not a step key."""
+        r = _make()
+        r["steps"][0]["filter"] = [{"field": "x", "op": "eq", "value": "1"}]
+        warnings = validate_recipe(r)
+        assert any("filter" in w and "steps" in w for w in warnings)
+
+    def test_record_key_on_step(self):
+        """record_key belongs on populations, not steps."""
+        r = _make()
+        r["steps"][0]["record_key"] = "vendor_id"
+        warnings = validate_recipe(r)
+        assert any("record_key" in w for w in warnings)
+
+    def test_action_on_step(self):
+        """action belongs on populations, not steps."""
+        r = _make()
+        r["steps"][0]["action"] = "exclude"
+        warnings = validate_recipe(r)
+        assert any("action" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# Structural errors raise ValueError
+# ---------------------------------------------------------------------------
+
+class TestStructuralErrors:
+    def test_missing_name(self):
+        r = _make()
+        del r["name"]
+        with pytest.raises(ValueError):
+            validate_recipe(r)
+
+    def test_missing_sources(self):
+        r = _make()
+        del r["sources"]
+        with pytest.raises(ValueError):
+            validate_recipe(r)
+
+    def test_missing_step_name(self):
+        r = _make()
+        del r["steps"][0]["name"]
+        with pytest.raises(ValueError):
+            validate_recipe(r)
+
+    def test_invalid_method_enum(self):
+        r = _make()
+        r["steps"][0]["match_fields"][0]["method"] = "approximate"
+        with pytest.raises(ValueError, match="schema validation failed"):
+            validate_recipe(r)
+
+    def test_invalid_output_format(self):
+        r = _make()
+        r["output"]["format"] = "pdf"
+        with pytest.raises(ValueError, match="schema validation failed"):
+            validate_recipe(r)
+
+
+# ---------------------------------------------------------------------------
+# Semantic warnings (record_key)
+# ---------------------------------------------------------------------------
+
+class TestSemanticWarnings:
+    def test_missing_record_key_warns(self):
+        r = _make()
+        del r["populations"]["pop1"]["record_key"]
+        warnings = validate_recipe(r)
+        assert any("record_key" in w for w in warnings)
+
+    def test_record_key_present_no_warning(self):
+        r = _make()
+        warnings = validate_recipe(r)
+        assert not any("record_key" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# New schema features (filters, record_key in schema)
+# ---------------------------------------------------------------------------
+
+class TestNewSchemaFeatures:
+    def test_step_filters_valid(self):
+        r = _make()
+        r["steps"][0]["filters"] = [
+            {"field": "status", "op": "eq", "value": "active", "applies_to": "destination"},
+            {"field": "date", "op": "max_age_years", "value": 2, "applies_to": "source"},
+        ]
+        warnings = validate_recipe(r)
+        # No schema warnings (record_key warning is fine)
+        schema_warnings = [w for w in warnings if "record_key" not in w]
+        assert schema_warnings == []
+
+    def test_population_record_key_valid(self):
+        r = _make()
+        r["populations"]["pop1"]["record_key"] = "vendor_id"
+        warnings = validate_recipe(r)
+        assert not any("record_key" in w for w in warnings)
