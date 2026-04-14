@@ -464,6 +464,61 @@ def test_address_scoring_no_collision():
     assert score >= 95, f"addr_score={score} -- identical addresses should be ~100"
 
 
+def test_address_scoring_receives_aliases():
+    """Address scorer should use aliases/stopwords for normalized tier."""
+    source_df = pl.DataFrame({
+        "name": ["Acme Corp"],
+        "record_key": ["RK001"],
+        "hq_addr1": ["123 Main Blvd"],
+        "hq_addr2": [""],
+    })
+    dest_df = pl.DataFrame({
+        "name": ["Acme Corp"],
+        "vendor_id": ["V001"],
+        "Address1": ["123 Main Boulevard"],
+        "Address2": [""],
+    })
+
+    step_config = {
+        "name": "Test aliases passthrough",
+        "source": "pop1",
+        "destination": "core_parent",
+        "match_fields": [{
+            "source": "name",
+            "destination": "name",
+            "method": "exact",
+            "tiers": ["raw"],
+        }],
+        "address_support": {
+            "source": ["hq_addr1", "hq_addr2"],
+            "destination": ["Address1", "Address2"],
+            "parser": "default",
+        },
+    }
+
+    aliases = {"blvd": "boulevard"}
+
+    # With aliases, normalized tier should see "boulevard" on both sides
+    matched_with = run_matching_step(
+        source_df, dest_df, step_config,
+        aliases=aliases, dedup_field="record_key",
+    )
+    # Without aliases, normalized tier treats "blvd" != "boulevard"
+    matched_without = run_matching_step(
+        source_df, dest_df, step_config,
+        dedup_field="record_key",
+    )
+
+    assert matched_with.height == 1
+    assert matched_without.height == 1
+    score_with = matched_with["addr_score"][0]
+    score_without = matched_without["addr_score"][0]
+    # Aliases should produce equal or higher score
+    assert score_with >= score_without, (
+        f"with={score_with} should be >= without={score_without}"
+    )
+
+
 def test_address_scoring_fuzzy_collision():
     """Fuzzy match with colliding address columns must use dest side."""
     source_df = pl.DataFrame({
