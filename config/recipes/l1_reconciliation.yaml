@@ -202,6 +202,12 @@ output:
         header: Data Entry Type
       - field: rq_intk_user
         header: Request User
+      - field: reason_code
+        header: Reason Code
+      - field: rejection_step
+        header: Rejection Step
+      - field: best_rejected_score
+        header: Best Rejected Score
 
 normalization:
   stopwords: config/stopwords.json

@@ -267,6 +267,7 @@ def validate_fields(
     known_derived = {
         "match_step", "match_tier", "name_score",
         "addr_score", "addr_street_match", "addr_comparison", "addr_tier",
+        "reason_code", "rejection_step", "best_rejected_score",
     }
     # Dynamically add columns from recipe inherit[].as values
     for step in recipe.get("steps", []):

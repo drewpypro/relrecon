@@ -88,6 +88,9 @@ ANALYSIS_COLUMNS = [
     ("tpty_l1_id", "L1 ID (invalid)"),
     ("data_entry_type", "Data Entry Type"),
     ("rq_intk_user", "Request User"),
+    ("reason_code", "Reason Code"),
+    ("rejection_step", "Rejection Step"),
+    ("best_rejected_score", "Best Rejected Score"),
 ]
 
 
@@ -275,21 +278,20 @@ def generate_report(matched_df: pl.DataFrame, unmatched_df: pl.DataFrame,
     ws_analysis = wb.create_sheet("Analysis")
 
     if unmatched_df.height > 0:
+        if "reason_code" not in unmatched_df.columns:
+            unmatched_df = unmatched_df.with_columns(
+                pl.lit("no_name_match").alias("reason_code"),
+                pl.lit(None).cast(pl.String).alias("rejection_step"),
+                pl.lit(None).cast(pl.Float64).alias("best_rejected_score"),
+            )
+
         if recipe_columns and "analysis" in recipe_columns:
             analysis_cols = _build_columns_from_recipe(recipe_columns["analysis"], unmatched_df)
         else:
             analysis_cols = _resolve_columns(unmatched_df, ANALYSIS_COLUMNS)
 
-        # Add reason code column
-        analysis_cols.append(("_reason", "Reason"))
-
         _write_headers(ws_analysis, analysis_cols, header_fill=ANALYSIS_HEADER_FILL)
-
-        # Add reason codes for unmatched records
-        unmatched_with_reason = unmatched_df.with_columns(
-            pl.lit("No name match found in core_parent or Pop3").alias("_reason")
-        )
-        _write_data(ws_analysis, unmatched_with_reason, analysis_cols)
+        _write_data(ws_analysis, unmatched_df, analysis_cols)
         _auto_width(ws_analysis, analysis_cols)
 
         ws_analysis.freeze_panes = "A2"

@@ -65,7 +65,7 @@ def test_generate_report():
     if result["unmatched"].height > 0:
         results.append({"check": "analysis_has_rows", "passed": ws_a.max_row > 1, "actual": ws_a.max_row})
         a_headers = [ws_a.cell(row=1, column=i).value for i in range(1, ws_a.max_column + 1)]
-        results.append({"check": "has_reason_col", "passed": "Reason" in a_headers, "actual": a_headers})
+        results.append({"check": "has_reason_col", "passed": "Reason Code" in a_headers, "actual": a_headers})
     else:
         results.append({"check": "analysis_empty_ok", "passed": True, "actual": "no unmatched"})
 
@@ -371,7 +371,9 @@ def test_recipe_driven_columns():
         ws2 = wb["Analysis"]
         a_headers = [c.value for c in ws2[1]]
         expected_analysis = [e["header"] for e in recipe["output"]["columns"]["analysis"]]
-        expected_analysis.append("Reason")  # auto-added
+        # Reason columns now come from pipeline enrichment (Issue #32),
+        # not auto-appended by the report. Recipe-driven analysis tabs
+        # only show what the recipe defines.
         assert a_headers == expected_analysis
 
 
