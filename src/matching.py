@@ -92,13 +92,16 @@ def match_names_exact(source_df: pl.DataFrame, dest_df: pl.DataFrame,
                       src_field: str, dst_field: str,
                       tiers: list = None,
                       aliases: dict = None,
-                      stopwords: list = None) -> pl.DataFrame:
+                      stopwords: list = None,
+                      dedup_field: str = None) -> pl.DataFrame:
     """Exact name matching via Polars joins. No Python loops.
 
-    Tries tiers in order (default: raw, clean). Deduplicates by tier priority.
+    Tries tiers in order (default: raw, clean). Deduplicates by tier priority
+    using dedup_field (defaults to src_field if not provided).
     If 'normalized' is in tiers, applies alias replacement + stopword removal
     using the provided aliases/stopwords (requires both to be effective).
     """
+    dedup_key = dedup_field or src_field
     if tiers is None:
         tiers = ["raw", "clean"]
 
@@ -134,7 +137,7 @@ def match_names_exact(source_df: pl.DataFrame, dest_df: pl.DataFrame,
     combined = (
         combined
         .sort("_tier_priority")
-        .unique(subset=[src_field], keep="first")
+        .unique(subset=[dedup_key], keep="first")
         .drop([c for c in combined.columns if c.startswith("_")])
     )
     return combined
@@ -146,7 +149,8 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
                       threshold: int = 80,
                       scorer: str = "token_sort_ratio",
                       aliases: dict = None,
-                      stopwords: list = None) -> pl.DataFrame:
+                      stopwords: list = None,
+                      dedup_field: str = None) -> pl.DataFrame:
     """Fuzzy name matching via RapidFuzz cdist (full C++ matrix, no Python loops).
 
     For each tier, builds match-key columns (same as exact), then uses
@@ -157,6 +161,7 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
 
     Returns matched DataFrame with name_score column (0-100).
     """
+    dedup_key = dedup_field or src_field
     if tiers is None:
         tiers = ["raw", "clean"]
 
@@ -241,7 +246,7 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
     combined = (
         combined
         .sort(["_tier_priority", "name_score"], descending=[False, True])
-        .unique(subset=[src_field], keep="first")
+        .unique(subset=[dedup_key], keep="first")
         .drop([c for c in combined.columns if c.startswith("_")])
     )
     return combined
@@ -305,7 +310,8 @@ def score_addresses_batch(matched_df: pl.DataFrame,
 
 def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
                       step_config: dict,
-                      aliases: dict = None, stopwords: list = None) -> pl.DataFrame:
+                      aliases: dict = None, stopwords: list = None,
+                      dedup_field: str = None) -> pl.DataFrame:
     """Execute one matching step from the recipe."""
 
     # Date gate on destination
@@ -329,6 +335,7 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             scorer=mf.get("scorer", "token_sort_ratio"),
             aliases=aliases,
             stopwords=stopwords,
+            dedup_field=dedup_field,
         )
     else:
         matched = match_names_exact(
@@ -337,6 +344,7 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             mf.get("tiers", ["raw", "clean"]),
             aliases=aliases,
             stopwords=stopwords,
+            dedup_field=dedup_field,
         )
 
     if matched.height == 0:
@@ -499,13 +507,31 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
     all_matched = []
     matched_source_keys = set()
 
-    # Determine the source ID field for unmatched tracking
-    # Use vendor_id or the match field as fallback
+    # Determine the unique record identifier for dedup and unmatched tracking.
+    # Uses record_key from the source population config. Falls back to match
+    # field only if record_key is not set (legacy recipes).
     pop1_name = recipe["steps"][0]["source"]
     src_match_field = recipe["steps"][0]["match_fields"][0]["source"]
     pop1_df_check = populations.get(pop1_name, {}).get("df", pl.DataFrame())
-    # Prefer vendor_id if available (more unique than names)
-    track_field = "vendor_id" if "vendor_id" in pop1_df_check.columns else src_match_field
+    pop1_cfg = recipe["populations"].get(pop1_name, {})
+    record_key = pop1_cfg.get("record_key")
+    if record_key:
+        if record_key not in pop1_df_check.columns:
+            from recipe import RecipeValidationError
+            raise RecipeValidationError(
+                f'Population "{pop1_name}" record_key "{record_key}" not found '
+                f'in source data. Available: {", ".join(sorted(pop1_df_check.columns)[:10])}'
+            )
+        track_field = record_key
+    else:
+        import sys
+        print(
+            f'[WARN] Population "{pop1_name}" has no record_key. '
+            f"Falling back to match field '{src_match_field}' for dedup — "
+            "records with duplicate names may be collapsed.",
+            file=sys.stderr,
+        )
+        track_field = src_match_field
 
     for step_idx, step in enumerate(recipe["steps"]):
         src_pop = step["source"]
@@ -522,7 +548,8 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             continue
 
         matched = run_matching_step(src_df, dst_df, step,
-                                       aliases=aliases, stopwords=stopwords)
+                                       aliases=aliases, stopwords=stopwords,
+                                       dedup_field=track_field)
 
         if matched.height > 0:
             # Tag step order for multi-match resolution
@@ -537,7 +564,6 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
         combined = pl.concat(all_matched, how="diagonal")
 
         if match_mode == "best_match":
-            src_field = recipe["steps"][0]["match_fields"][0]["source"]
             # Sort: prefer earlier step, then higher name score, then higher address score
             sort_cols = ["_step_order"]
             sort_desc = [False]
@@ -548,7 +574,7 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
                 sort_cols.append("addr_score")
                 sort_desc.append(True)
             combined = combined.sort(sort_cols, descending=sort_desc)
-            combined = combined.unique(subset=[src_field], keep="first")
+            combined = combined.unique(subset=[track_field], keep="first")
 
         # Exact matches get name_score=100 (fuzzy steps already have scores)
         if "name_score" in combined.columns:

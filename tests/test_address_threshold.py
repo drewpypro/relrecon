@@ -26,15 +26,19 @@ def _load_with_threshold(threshold=None):
 
 
 def test_no_threshold_keeps_all():
-    """Without threshold, all matches kept regardless of score."""
+    """Without threshold, all matches kept regardless of score.
+
+    Count is 32 after Issue #54 fix (dedup on vendor_id preserves records
+    with duplicate l3_fmly_nm but different vendor_ids).
+    """
     res = _load_with_threshold(threshold=None)
-    assert res["stats"]["matched_count"] == 31
+    assert res["stats"]["matched_count"] == 32
 
 
 def test_low_threshold_keeps_all():
     """Low threshold keeps everything."""
     res = _load_with_threshold(threshold=10)
-    assert res["stats"]["matched_count"] == 31
+    assert res["stats"]["matched_count"] == 32
 
 
 def test_high_threshold_filters():
