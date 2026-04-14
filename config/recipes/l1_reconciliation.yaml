@@ -12,6 +12,7 @@ sources:
 populations:
   pop1:
     source: multi_pop
+    record_key: vendor_id
     filter:
       - field: vendor_id
         op: starts_with
