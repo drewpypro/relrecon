@@ -231,7 +231,7 @@ def test_score_address_pair_exact():
     dst = build_variants("194 6th Avenue Floor 7", "New York NY 10005")
     result = score_address_pair(src, dst, tier="raw", parser="default")
     results = []
-    results.append({"check": "high_score", "passed": result["best_score"] >= 0.95,
+    results.append({"check": "high_score", "passed": result["best_score"] >= 95,
                      "actual": result["best_score"]})
     results.append({"check": "street_match", "passed": result["street_match"],
                      "actual": result["street_match"]})
@@ -245,7 +245,7 @@ def test_score_address_pair_similar():
     dst = build_variants("194 6TH AVENUE FLOOR 7", "NEW YORK NY 10005")
     result = score_address_pair(src, dst, tier="clean", parser="default")
     results = []
-    results.append({"check": "reasonable_score", "passed": result["best_score"] >= 0.5,
+    results.append({"check": "reasonable_score", "passed": result["best_score"] >= 50,
                      "actual": result["best_score"]})
     for r in results:
         assert r["passed"], f"Failed: {r}"
@@ -257,7 +257,7 @@ def test_score_address_pair_different():
     dst = build_variants("9600 Medical Center Drive", "Rockville MD")
     result = score_address_pair(src, dst, tier="clean", parser="default")
     results = []
-    results.append({"check": "low_score", "passed": result["best_score"] < 0.5,
+    results.append({"check": "low_score", "passed": result["best_score"] < 50,
                      "actual": result["best_score"]})
     for r in results:
         assert r["passed"], f"Failed: {r}"
@@ -270,12 +270,12 @@ def test_score_address_swapped_columns():
     result = score_address_pair(src, dst, tier="clean", parser="default")
     results = []
     # Cross-compare should catch this
-    results.append({"check": "catches_swap", "passed": result["best_score"] >= 0.6,
+    results.append({"check": "catches_swap", "passed": result["best_score"] >= 60,
                      "actual": result["best_score"]})
     # merged<>merged or cross-compare both valid -- token_sort_ratio
     # handles reordering, so merged may still win
     results.append({"check": "found_match",
-                     "passed": result["best_score"] >= 0.6,
+                     "passed": result["best_score"] >= 60,
                      "actual": f"{result['best_comparison']} score={result['best_score']}"})
     for r in results:
         assert r["passed"], f"Failed: {r}"
@@ -331,7 +331,7 @@ def test_score_with_synthetic_data():
     )
     results.append({
         "check": "bapienx_match",
-        "passed": result["best_score"] >= 0.6,
+        "passed": result["best_score"] >= 60,
         "actual": result["best_score"],
         "detail": f"{pop1_row['hq_addr1']} vs {core_row['Address1']}",
     })

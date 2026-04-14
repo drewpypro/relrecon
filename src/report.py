@@ -116,13 +116,13 @@ def _write_data(ws, df: pl.DataFrame, columns: list, start_row: int = 2):
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 cell.border = THIN_BORDER
 
-                # Conditional formatting for address scores
-                if col_name == "addr_score" and value is not None:
+                # Conditional formatting for score columns (0-100 scale)
+                if col_name in ("addr_score", "name_score") and value is not None:
                     try:
                         score = float(value)
-                        if score >= 0.8:
+                        if score >= 80:
                             cell.fill = SCORE_HIGH
-                        elif score >= 0.6:
+                        elif score >= 60:
                             cell.fill = SCORE_MED
                         else:
                             cell.fill = SCORE_LOW
