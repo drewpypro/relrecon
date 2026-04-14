@@ -55,6 +55,24 @@ def validate_recipe(recipe: dict) -> None:
     if "format" not in recipe["output"]:
         raise ValueError("Output missing 'format' field")
 
+    # Warn if a source population used in steps is missing record_key.
+    # Only check populations that appear as a step source (not destinations
+    # like pop3, not excluded populations like garbage).
+    source_pops = {step["source"] for step in recipe.get("steps", [])}
+    for pop_name in source_pops:
+        pop_cfg = recipe.get("populations", {}).get(pop_name, {})
+        if pop_cfg.get("action") == "exclude":
+            continue
+        if "record_key" not in pop_cfg:
+            import sys
+            print(
+                f'[WARN] Population "{pop_name}" has no record_key. '
+                "Dedup will fall back to match field — records with "
+                "duplicate names may be collapsed. Set record_key to the "
+                "field that uniquely identifies each source record.",
+                file=sys.stderr,
+            )
+
 
 def load_source(source_config: dict, base_dir: str = ".") -> pl.DataFrame:
     """Load a data source. Auto-detects CSV/Parquet from extension."""
