@@ -305,6 +305,53 @@ def score_addresses_batch(matched_df: pl.DataFrame,
 
 
 # ---------------------------------------------------------------------------
+# Step filters (generic, replaces date_gate)
+# ---------------------------------------------------------------------------
+
+
+def _normalize_step_filters(step_config: dict) -> dict:
+    """Convert legacy date_gate to generic filters list.
+
+    If both date_gate and filters exist, date_gate is appended to filters.
+    Returns a new dict (does not mutate the original).
+    """
+    if "date_gate" not in step_config:
+        return step_config
+
+    step_config = dict(step_config)  # shallow copy
+    dg = step_config.pop("date_gate")
+    filters = list(step_config.get("filters", []))
+    filters.append({
+        "field": dg["field"],
+        "op": "max_age_years",
+        "value": dg["max_age_years"],
+        "applies_to": dg.get("applies_to", "destination"),
+    })
+    step_config["filters"] = filters
+    return step_config
+
+
+def _apply_step_filter(df: pl.DataFrame, filt: dict) -> pl.DataFrame:
+    """Apply a single step filter to a DataFrame.
+
+    Supports all population filter ops plus:
+    - max_age_years: date recency filter (same as legacy date_gate)
+    """
+    field = filt["field"]
+    op = filt["op"]
+
+    if op == "max_age_years":
+        return apply_date_gate(df, field, filt["value"])
+
+    # Delegate to the standard filter DSL
+    from recipe import build_filter_expr
+    expr = build_filter_expr([{"field": field, "op": op,
+                               "value": filt.get("value"),
+                               "values": filt.get("values")}])
+    return df.filter(expr)
+
+
+# ---------------------------------------------------------------------------
 # Single matching step
 # ---------------------------------------------------------------------------
 
@@ -314,13 +361,18 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
                       dedup_field: str = None) -> pl.DataFrame:
     """Execute one matching step from the recipe."""
 
-    # Date gate on destination
-    if "date_gate" in step_config:
-        dg = step_config["date_gate"]
-        if dg.get("applies_to") in ("destination", "both"):
-            dest_df = apply_date_gate(dest_df, dg["field"], dg["max_age_years"])
-        if dest_df.height == 0:
-            return pl.DataFrame()
+    # Normalize date_gate → filters (backward compat)
+    step_config = _normalize_step_filters(step_config)
+
+    # Apply step filters to source/destination
+    for filt in step_config.get("filters", []):
+        applies_to = filt.get("applies_to", "destination")
+        if applies_to in ("destination", "both"):
+            dest_df = _apply_step_filter(dest_df, filt)
+        if applies_to in ("source", "both"):
+            source_df = _apply_step_filter(source_df, filt)
+    if dest_df.height == 0:
+        return pl.DataFrame()
 
     # Name matching
     mf = step_config["match_fields"][0]

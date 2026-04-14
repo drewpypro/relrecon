@@ -224,7 +224,7 @@ def validate_fields(
                 if dst_df is not None:
                     _check(af, dst_df, f"{step_label} address_support.destination", critical=False)
 
-        # date_gate (warning)
+        # date_gate (warning — legacy, still supported)
         if "date_gate" in step:
             dg = step["date_gate"]
             dg_field = dg.get("field", "")
@@ -232,6 +232,15 @@ def validate_fields(
             check_df = dst_df if applies_to == "destination" else src_df
             if check_df is not None and dg_field:
                 _check(dg_field, check_df, f"{step_label} date_gate", critical=False)
+
+        # step filters (warning)
+        for fi, filt in enumerate(step.get("filters", [])):
+            filt_field = filt.get("field", "")
+            applies_to = filt.get("applies_to", "destination")
+            if applies_to in ("destination", "both") and dst_df is not None and filt_field:
+                _check(filt_field, dst_df, f"{step_label} filters[{fi}] (destination)", critical=False)
+            if applies_to in ("source", "both") and src_df is not None and filt_field:
+                _check(filt_field, src_df, f"{step_label} filters[{fi}] (source)", critical=False)
 
         # inherit (critical)
         for inh in step.get("inherit", []):
@@ -369,6 +378,16 @@ def format_validation_summary(
             check_df = dst_df if applies_to == "destination" else src_df
             ok = check_df is not None and dg_field in check_df.columns
             lines.append(f"    date_gate: {dg_field} {'✅' if ok else '⚠️'}")
+
+        for fi, filt in enumerate(step.get("filters", [])):
+            filt_field = filt.get("field", "")
+            applies_to = filt.get("applies_to", "destination")
+            if applies_to in ("destination", "both"):
+                check_df_f = dst_df
+            else:
+                check_df_f = src_df
+            ok = check_df_f is not None and filt_field in check_df_f.columns
+            lines.append(f"    filters[{fi}]: {filt_field} ({filt.get('op', '?')}, {applies_to}) {'✅' if ok else '⚠️'}")
 
         for inh in step.get("inherit", []):
             ok = dst_df is not None and inh["source"] in dst_df.columns
