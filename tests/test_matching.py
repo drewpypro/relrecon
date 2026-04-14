@@ -375,6 +375,138 @@ def test_clean_column_uses_shared_normalize():
         assert r["passed"], f"Failed: {r}"
 
 
+def test_address_scoring_column_collision():
+    """Colliding column names must not cause source-to-source comparison."""
+    # Source and dest with SAME column names but DIFFERENT addresses
+    source_df = pl.DataFrame({
+        "name": ["Acme Corp"],
+        "record_key": ["RK001"],
+        "hq_addr1": ["123 Main St"],
+        "hq_addr2": ["Suite 100"],
+    })
+    dest_df = pl.DataFrame({
+        "name": ["Acme Corp"],
+        "record_key": ["RK999"],
+        "hq_addr1": ["999 Totally Different Rd"],
+        "hq_addr2": ["Floor 50"],
+    })
+
+    step_config = {
+        "name": "Test collision step",
+        "source": "pop1",
+        "destination": "pop3",
+        "match_fields": [{
+            "source": "name",
+            "destination": "name",
+            "method": "exact",
+            "tiers": ["raw"],
+        }],
+        "address_support": {
+            "source": ["hq_addr1", "hq_addr2"],
+            "destination": ["hq_addr1", "hq_addr2"],
+            "parser": "default",
+        },
+    }
+
+    matched = run_matching_step(
+        source_df, dest_df, step_config,
+        dedup_field="record_key",
+    )
+
+    assert matched.height == 1, "Should produce one match"
+    score = matched["addr_score"][0]
+    # Before fix: score was 100 (comparing source to itself)
+    # After fix: score reflects actual difference between addresses
+    assert score < 100, f"addr_score={score} -- comparing source to itself (column collision)"
+    assert matched["addr_tier"][0] is not None
+    assert matched["addr_comparison"][0] is not None
+
+
+def test_address_scoring_no_collision():
+    """Different column names should score correctly without _dst resolution."""
+    source_df = pl.DataFrame({
+        "name": ["Acme Corp"],
+        "record_key": ["RK001"],
+        "hq_addr1": ["123 Main St"],
+        "hq_addr2": ["Suite 100"],
+    })
+    dest_df = pl.DataFrame({
+        "name": ["Acme Corp"],
+        "vendor_id": ["V001"],
+        "Address1": ["123 Main St"],
+        "Address2": ["Suite 100"],
+    })
+
+    step_config = {
+        "name": "Test no-collision step",
+        "source": "pop1",
+        "destination": "core_parent",
+        "match_fields": [{
+            "source": "name",
+            "destination": "name",
+            "method": "exact",
+            "tiers": ["raw"],
+        }],
+        "address_support": {
+            "source": ["hq_addr1", "hq_addr2"],
+            "destination": ["Address1", "Address2"],
+            "parser": "default",
+        },
+    }
+
+    matched = run_matching_step(
+        source_df, dest_df, step_config,
+        dedup_field="record_key",
+    )
+
+    assert matched.height == 1, "Should produce one match"
+    score = matched["addr_score"][0]
+    assert score >= 95, f"addr_score={score} -- identical addresses should be ~100"
+
+
+def test_address_scoring_fuzzy_collision():
+    """Fuzzy match with colliding address columns must use dest side."""
+    source_df = pl.DataFrame({
+        "name": ["Acme Corporation"],
+        "record_key": ["RK001"],
+        "hq_addr1": ["123 Main St"],
+        "hq_addr2": [""],
+    })
+    dest_df = pl.DataFrame({
+        "name": ["Acme Corp"],
+        "record_key": ["RK999"],
+        "hq_addr1": ["456 Oak Ave"],
+        "hq_addr2": [""],
+    })
+
+    step_config = {
+        "name": "Test fuzzy collision",
+        "source": "pop1",
+        "destination": "pop3",
+        "match_fields": [{
+            "source": "name",
+            "destination": "name",
+            "method": "fuzzy",
+            "threshold": 60,
+            "tiers": ["raw"],
+        }],
+        "address_support": {
+            "source": ["hq_addr1", "hq_addr2"],
+            "destination": ["hq_addr1", "hq_addr2"],
+            "parser": "default",
+        },
+    }
+
+    matched = run_matching_step(
+        source_df, dest_df, step_config,
+        dedup_field="record_key",
+    )
+
+    assert matched.height == 1, "Should produce one fuzzy match"
+    score = matched["addr_score"][0]
+    assert score < 100, f"addr_score={score} -- comparing source to itself (column collision)"
+
+
 # --- Runner ---
 
 def run_all():
