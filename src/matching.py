@@ -358,13 +358,12 @@ def _apply_step_filter(df: pl.DataFrame, filt: dict) -> pl.DataFrame:
 def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
                       step_config: dict,
                       aliases: dict = None, stopwords: list = None,
-                      dedup_field: str = None) -> pl.DataFrame:
-    """Execute one matching step from the recipe."""
+                      dedup_field: str = None,
+                      collect_rejections: bool = False) -> pl.DataFrame | tuple:
+    """Execute one matching step. Returns (matched_df, rejections) when collect_rejections=True."""
 
-    # Normalize date_gate → filters (backward compat)
     step_config = _normalize_step_filters(step_config)
 
-    # Apply step filters to source/destination
     for filt in step_config.get("filters", []):
         applies_to = filt.get("applies_to", "destination")
         if applies_to in ("destination", "both"):
@@ -372,6 +371,8 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
         if applies_to in ("source", "both"):
             source_df = _apply_step_filter(source_df, filt)
     if dest_df.height == 0:
+        if collect_rejections:
+            return pl.DataFrame(), {"filtered_by_step_filter": set()}
         return pl.DataFrame()
 
     # Name matching
@@ -400,9 +401,12 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
         )
 
     if matched.height == 0:
+        if collect_rejections:
+            return pl.DataFrame(), {}
         return pl.DataFrame()
 
     # Address scoring (if configured)
+    rejections = {}
     if "address_support" in step_config:
         ac = step_config["address_support"]
         src_a1, src_a2 = ac["source"][0], ac["source"][1] if len(ac["source"]) > 1 else ac["source"][0]
@@ -421,9 +425,14 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             parser=ac.get("parser", "auto"),
         )
 
-        # Enforce threshold if set
         if "threshold" in ac and "addr_score" in matched.columns:
-            cutoff = ac["threshold"]  # both threshold and addr_score are 0-100
+            cutoff = ac["threshold"]
+            if collect_rejections and dedup_field and dedup_field in matched.columns:
+                below = matched.filter(pl.col("addr_score") < cutoff)
+                if below.height > 0:
+                    keys = below[dedup_field].to_list()
+                    scores = below["addr_score"].to_list()
+                    rejections["addr_below_threshold"] = dict(zip(keys, scores))
             matched = matched.filter(pl.col("addr_score") >= cutoff)
 
     # Add step metadata
@@ -438,6 +447,8 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
         elif src_col + "_dst" in matched.columns:
             matched = matched.rename({src_col + "_dst": as_col})
 
+    if collect_rejections:
+        return matched, rejections
     return matched
 
 
@@ -558,6 +569,7 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
     match_mode = recipe.get("output", {}).get("match_mode", "best_match")
     all_matched = []
     matched_source_keys = set()
+    all_rejections = {}  # track_field_value -> {reason, step, score}
 
     # Determine the unique record identifier for dedup and unmatched tracking.
     # Uses record_key from the source population config. Falls back to match
@@ -599,9 +611,20 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
         if dst_df is None or dst_df.height == 0:
             continue
 
-        matched = run_matching_step(src_df, dst_df, step,
-                                       aliases=aliases, stopwords=stopwords,
-                                       dedup_field=track_field)
+        step_result = run_matching_step(src_df, dst_df, step,
+                                           aliases=aliases, stopwords=stopwords,
+                                           dedup_field=track_field,
+                                           collect_rejections=True)
+        matched, rejections = step_result
+
+        if "addr_below_threshold" in rejections:
+            for key, score in rejections["addr_below_threshold"].items():
+                if key not in all_rejections:
+                    all_rejections[key] = {
+                        "reason": "addr_below_threshold",
+                        "step": step["name"],
+                        "best_addr_score": score,
+                    }
 
         if matched.height > 0:
             # Tag step order for multi-match resolution
@@ -647,6 +670,23 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
         unmatched = pop1_df.filter(~pl.col(track_field).is_in(list(matched_source_keys)))
     else:
         unmatched = pl.DataFrame()
+
+    if unmatched.height > 0 and track_field in unmatched.columns and all_rejections:
+        rej_df = pl.DataFrame([
+            {track_field: k, "reason_code": v["reason"],
+             "rejection_step": v["step"], "best_rejected_score": v.get("best_addr_score")}
+            for k, v in all_rejections.items()
+        ])
+        unmatched = unmatched.join(rej_df, on=track_field, how="left")
+        unmatched = unmatched.with_columns(
+            pl.col("reason_code").fill_null("no_name_match"),
+        )
+    elif unmatched.height > 0:
+        unmatched = unmatched.with_columns(
+            pl.lit("no_name_match").alias("reason_code"),
+            pl.lit(None).cast(pl.String).alias("rejection_step"),
+            pl.lit(None).cast(pl.Float64).alias("best_rejected_score"),
+        )
 
     return {
         "matched": combined,
