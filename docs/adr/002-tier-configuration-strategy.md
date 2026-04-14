@@ -3,7 +3,6 @@
 **Status:** Accepted (Option B)  
 **Date:** 2026-04-14  
 
-
 ## Problem
 
 Normalization tiers (raw, clean, normalized) are configured inconsistently between name matching and address scoring:
@@ -36,19 +35,25 @@ flowchart LR
 5. **Filter vs signal**: address scoring serves two roles depending on config:
    - **With threshold**: it's a filter (records below threshold are rejected)
    - **Without threshold**: it's a confidence signal (all records pass, score is informational)
-   When filtering, the user may want tight control over which tiers produce the score that determines pass/fail. When signaling, all tiers running maximizes the chance of finding the best score. The tier config should support both use cases.
+   When filtering, the user may want tight control over which tiers produce the score that determines pass/fail.
+   When signaling, all tiers running maximizes the chance of finding the best score.
+   The tier config should support both use cases.
 
 ## How Tiers Work Today
 
-Important: tiers apply the **same** normalization to both source and destination. There are no cross-tier comparisons (e.g. clean-source vs raw-dest).
+Important: tiers apply the **same** normalization to both source and destination.
+There are no cross-tier comparisons (e.g. clean-source vs raw-dest).
 
 With `tiers: [clean, raw]`, the engine runs:
 
 1. **clean vs clean**: normalize both source and dest with `clean()`, then join/compare
+
 2. **raw vs raw**: use both source and dest as-is, then join/compare
+
 3. Dedup: if the same source record matched in both tiers, keep the preferred one
 
-It does NOT try clean-source vs raw-dest or any mixed combination. Each tier is a complete pass where both sides get the same treatment.
+It does NOT try clean-source vs raw-dest or any mixed combination.
+Each tier is a complete pass where both sides get the same treatment.
 
 For address scoring, the same applies -- each tier normalizes both source and dest addresses identically before scoring.
 

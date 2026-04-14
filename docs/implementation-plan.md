@@ -91,12 +91,17 @@ Uses `config/address_patterns.json` (street suffixes, unit keywords, directional
 | 1 -- Token classification | Match tokens against static patterns, infer street name from unmatched tokens before first suffix | Structured components with street name weighted higher |
 | 2 -- Full-string score | RapidFuzz token_sort_ratio on full address string | Blunt score, no street weighting |
 
-Note: "fuzzy" in address scoring (RapidFuzz on addresses) is unrelated to fuzzy name matching (RapidFuzz cdist on names). Address scoring always uses RapidFuzz regardless of whether the name match was exact or fuzzy.
+Note: "fuzzy" in address scoring (RapidFuzz on addresses) is unrelated to fuzzy name matching (RapidFuzz cdist on names).
+Address scoring always uses RapidFuzz regardless of whether the name match was exact or fuzzy.
 
 **Pipeline (both modes):**
+
 1. Merge addr1 + addr2 → build variants (addr1_only, addr2_only, addr_merged)
+
 2. For each tier (raw → clean → normalized): normalize, then score full string, then parse for street name
+
 3. Cross-compare all combinations (merged<>merged, addr1<>addr1, etc.) → best weighted score wins
+
 4. Return: best score, comparison/tier that matched, whether street name was identified
 
 See [how-scoring-works.md](how-scoring-works.md) for detailed walkthrough.
@@ -240,36 +245,3 @@ print(f"libpostal available: {LIBPOSTAL_AVAILABLE}")  # True if installed
 ```
 
 Or set `parser: libpostal` in the recipe to require it (fails if not installed).
-
----
-
-## PR History
-
-| PR | Phase | Description | Status |
-|---|---|---|---|
-| #8 | -- | Implementation plan | Merged |
-| #9 | 1 | normalize.py + unicode_ranges.json + tests | Merged |
-| #10 | 2 | signal_analysis.py + config generation + tests | Merged |
-| #11 | 3 | address.py + address_patterns.json + tests | Merged |
-| #13 | 4 | matching.py + recipe.py + l1_reconciliation.yaml + tests | Merged |
-| #14 | 5 | report.py + Excel output + tests | Merged |
-| #15 | -- | CLI entry point (`python3 -m src`) | Merged |
-| #16 | -- | clean() punctuation fix | Merged |
-| #17 | -- | Report destination address columns | Merged |
-| #18 | -- | requirements.txt, CSV dedup, test warnings (63 total, 0 warnings) |
-| #22 | -- | fix: coalesce variant dest columns in all_matches mode |
-| #26 | -- | feat: semantic recipe validation + enhanced --dry-run |
-| #27 | -- | feat: recipe-driven report column mapping (output.columns in recipe) |
-| #30 | -- | fix: force string inference for CSV loading (infer_schema_length=0) |
-| #33 | -- | fix: normalization config path resolution + name stopwords |
-| #34 | -- | feat: fuzzy name matching (cdist, recipe-configurable) + script defaults (90 tests) | Merged |
-| #56 | -- | fix: dedup on record_key instead of match field | Merged |
-| #58 | -- | fix: addr_score normalized to 0-100, name_score coloring | Merged |
-| #59 | -- | feat: generic step filters replacing date_gate (backward compatible) | Merged |
-| #62 | -- | feat: enriched analysis tab with reason codes | Merged |
-| #64 | -- | feat: pipeline timing per phase + CLI cleanup | Merged |
-| #65 | -- | fix: inherit prefers _dst suffix columns | Merged |
-| #67 | -- | feat: JSON Schema validation for recipes (additionalProperties: false) | Merged |
-| #68 | -- | docs: filter ops reference (standard vs special ops) | Merged |
-| #69 | -- | feat: run summary -- Excel Summary tab + markdown output | Merged |
-| #70 | -- | feat: Mermaid cascade diagram in summary + --mermaid CLI flag | Merged |

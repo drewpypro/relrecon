@@ -1,6 +1,7 @@
 # How Scoring Works
 
-The matching pipeline produces two scores per matched record: a **name score** (how the pair was found) and an **address score** (confidence signal or filter). These are independent systems that run sequentially.
+The matching pipeline produces two scores per matched record: a **name score** (how the pair was found) and an **address score** (confidence signal or filter).
+These are independent systems that run sequentially.
 
 ## Systems Overview
 
@@ -23,11 +24,16 @@ These are stacked, not alternatives. Every address pair goes through all three.
 
 Name matching finds candidate pairs. Two methods:
 
-**Exact** (`method: exact`): Polars inner join on normalized name values. If the names are identical after tier normalization, they match. Score is always **100**.
+**Exact** (`method: exact`): Polars inner join on normalized name values.
+If the names are identical after tier normalization, they match.
+Score is always **100**.
 
-**Fuzzy** (`method: fuzzy`): RapidFuzz `cdist` computes a full score matrix (C++ backend, no Python loops). Each source record gets the best-scoring destination above the threshold. Score is **0-100** (e.g. 85.7 means 85.7% similarity).
+**Fuzzy** (`method: fuzzy`): RapidFuzz `cdist` computes a full score matrix (C++ backend, no Python loops).
+Each source record gets the best-scoring destination above the threshold.
+Score is **0-100** (e.g. 85.7 means 85.7% similarity).
 
-Both methods try tiers in recipe order (e.g. `tiers: [raw, clean]`). If a record matches on multiple tiers, the earlier tier in the list wins.
+Both methods try tiers in recipe order (e.g. `tiers: [raw, clean]`).
+If a record matches on multiple tiers, the earlier tier in the list wins.
 
 | Setting | Where | Default |
 |---|---|---|
@@ -73,15 +79,19 @@ For each address pair, per normalization tier:
               no street?    weighted = full_score
 ```
 
-This runs for each tier (raw, clean, normalized) and each comparison (merged<>merged, addr1<>addr1, addr1<>addr2, addr2<>addr1, addr2<>addr2). The best weighted score across all tiers and comparisons wins.
+This runs for each tier (raw, clean, normalized) and each comparison (merged<>merged, addr1<>addr1, addr1<>addr2, addr2<>addr1, addr2<>addr2).
+The best weighted score across all tiers and comparisons wins.
 
-**Why normalize before parse:** The parser sees cleaner input. Alias expansion (blvd→boulevard) helps the built-in tokenizer match street suffixes. Stopword removal reduces noise. libpostal handles raw input fine, but clean input doesn't hurt it.
+**Why normalize before parse:** The parser sees cleaner input.
+Alias expansion (blvd→boulevard) helps the built-in tokenizer match street suffixes.
+Stopword removal reduces noise.
+libpostal handles raw input fine, but clean input doesn't hurt it.
 
 ### Worked Example
 
 Source: `"123 Main Blvd Suite 200"` vs Dest: `"123 MAIN BOULEVARD STE 200"`
 
-Aliases: `{"blvd": "boulevard", "ste": "suite"}`
+Aliases: `{"blvd": "boulevard", "ste": "suite"}`  
 Stopwords: `{"address": ["suite"]}`
 
 #### RAW tier
@@ -140,7 +150,8 @@ The report shows several tier-related columns that can be confusing because they
 | `addr_tier` | Which tier produced that best score (informational only) | Address scoring |
 | `addr_comparison` | Which field combo scored best -- addr1<>addr1, merged<>merged, etc. (informational only) | Address scoring |
 
-`match_tier` and `addr_tier` are independent and often different. Example:
+`match_tier` and `addr_tier` are independent and often different.
+Example:
 
 ```
 Source name: "ACME CORP"     Dest name: "Acme Corp"
@@ -154,24 +165,33 @@ Report shows: match_tier=clean, addr_tier=raw
 
 This is correct -- the name needed cleaning to match, but the addresses were already identical raw.
 
-Note: the report shows **original values** (pre-normalization) alongside tier metadata. The tier tells you what normalization was applied internally to find the match or produce the score.
+Note: the report shows **original values** (pre-normalization) alongside tier metadata.
+The tier tells you what normalization was applied internally to find the match or produce the score.
 
 ## Address Threshold and Cascading
 
 When `address_support.threshold` is set (e.g. 60), it acts as a **cascade filter**, not a record deletion:
 
 1. Record matches on name in Step 1 → address score = 45 → below threshold
+
 2. Record is removed from Step 1 results but **cascades to Step 2**
+
 3. Step 2 tries matching with a different destination population
+
 4. If Step 2 produces addr_score >= 60 → record is kept
+
 5. If no step produces a passing score → record appears in the Analysis tab with `reason_code: addr_below_threshold` and `best_rejected_score: 45`
 
-No records are lost. The threshold just says "this match isn't good enough, try the next step."
+No records are lost.
+The threshold just says "this match isn't good enough, try the next step."
 
 ## Name Tiers vs Address Tiers
 
-The recipe `match_fields.tiers` setting (e.g. `[raw, clean]`) only controls **name matching**. Address scoring always tries all three tiers (raw, clean, normalized) regardless of what the recipe specifies. See [ADR-002](adr/002-tier-configuration-strategy.md) for a proposal to make address tiers configurable.
+The recipe `match_fields.tiers` setting (e.g. `[raw, clean]`) only controls **name matching**.
+Address scoring always tries all three tiers (raw, clean, normalized) regardless of what the recipe specifies.
+See [ADR-002](adr/002-tier-configuration-strategy.md) for a proposal to make address tiers configurable.
 
 ## Reserved Column Names
 
-The join engine uses the `_dst` suffix to disambiguate destination columns when source and destination share column names (e.g. both populations having `hq_addr1`). Source data column names should not end in `_dst` to avoid conflicts with this internal naming.
+The join engine uses the `_dst` suffix to disambiguate destination columns when source and destination share column names (e.g. both populations having `hq_addr1`).
+Source data column names should not end in `_dst` to avoid conflicts with this internal naming.

@@ -96,11 +96,17 @@ Address matching is **supporting evidence** in all steps, not standalone match c
 **Approach:**
 
 1. **Build variants**: for each record, `addr1_only`, `addr2_only`, `addr_merged` (concatenated)
+
 2. **Normalize**: apply tier (raw, clean, or normalized with alias expansion)
+
 3. **Score (full)**: RapidFuzz token_sort_ratio on the normalized full strings
+
 4. **Parse**: extract street name using libpostal or built-in tokenizer
+
 5. **Score (street)**: RapidFuzz ratio on extracted street names, 60/40 weighting when street match detected
-6. **Compare**: all combinations (merged<>merged, addr1<>addr1, addr1<>addr2, etc.). Best weighted score across all tiers and comparisons wins.
+
+6. **Compare**: all combinations (merged<>merged, addr1<>addr1, addr1<>addr2, etc.).
+   Best weighted score across all tiers and comparisons wins.
 
 See [how-scoring-works.md](how-scoring-works.md) for a detailed walkthrough with worked examples.
 
