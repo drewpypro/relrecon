@@ -193,6 +193,19 @@ def main() -> int:
     )
     print(f"Report saved: {report_path} ({time.time() - t_report:.2f}s)")
 
+    # Generate markdown summary alongside the report
+    try:
+        from summary import generate_summary
+        timing = result.get("timing")
+        summary_md = generate_summary(recipe, stats, result["matched"], timing=timing)
+        summary_path = report_path.replace(".xlsx", "_summary.md")
+        Path(summary_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(summary_path, "w") as f:
+            f.write(summary_md)
+        print(f"Summary saved: {summary_path}")
+    except Exception as exc:
+        print(f"[WARN] Summary generation failed: {exc}", file=sys.stderr)
+
     return 0
 
 

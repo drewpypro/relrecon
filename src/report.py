@@ -298,13 +298,15 @@ def generate_report(matched_df: pl.DataFrame, unmatched_df: pl.DataFrame,
     else:
         ws_analysis.cell(row=1, column=1, value="All records matched")
 
-    # --- Stats summary (row at bottom of Main tab) ---
-    if stats:
-        row = (matched_df.height if matched_df.height > 0 else 0) + 3
-        ws_main.cell(row=row, column=1, value="Pipeline Stats").font = Font(bold=True)
-        ws_main.cell(row=row + 1, column=1, value=f"Total Source: {stats.get('total_source', 'N/A')}")
-        ws_main.cell(row=row + 2, column=1, value=f"Matched: {stats.get('matched_count', 'N/A')}")
-        ws_main.cell(row=row + 3, column=1, value=f"Unmatched: {stats.get('unmatched_count', 'N/A')}")
+    # --- Summary Tab (first sheet) ---
+    if recipe and stats:
+        try:
+            from summary import write_summary_tab
+            ws_summary = wb.create_sheet("Summary", 0)  # Insert at position 0
+            write_summary_tab(ws_summary, recipe, stats, matched_df)
+        except Exception as exc:
+            import sys
+            print(f"[WARN] Summary tab generation failed: {exc}", file=sys.stderr)
 
     wb.save(str(out))
     return str(out)

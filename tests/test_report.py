@@ -119,7 +119,7 @@ def test_run_and_report():
 
     from openpyxl import load_workbook
     wb = load_workbook(path)
-    results.append({"check": "two_sheets", "passed": len(wb.sheetnames) == 2, "actual": wb.sheetnames})
+    results.append({"check": "has_expected_sheets", "passed": set(wb.sheetnames) >= {"Matched", "Analysis"}, "actual": wb.sheetnames})
     wb.close()
     Path(out_path).unlink(missing_ok=True)
     for r in results:
@@ -172,23 +172,31 @@ def test_empty_unmatched():
 
 
 def test_stats_in_report():
-    """Pipeline stats should appear in the report."""
+    """Pipeline stats should appear in the Summary tab when recipe is provided."""
     result = _get_pipeline_result()
     out_path = _tmp_xlsx()
-    generate_report(result["matched"], result["unmatched"], out_path, result["stats"])
+
+    from recipe import load_recipe
+    recipe = load_recipe(str(RECIPE_PATH))
+    generate_report(result["matched"], result["unmatched"], out_path, result["stats"], recipe=recipe)
 
     from openpyxl import load_workbook
     wb = load_workbook(out_path)
-    ws = wb["Matched"]
 
+    found_summary = "Summary" in wb.sheetnames
     found_stats = False
-    for row in range(ws.max_row, 0, -1):
-        val = ws.cell(row=row, column=1).value
-        if val and "Pipeline Stats" in str(val):
-            found_stats = True
-            break
+    if found_summary:
+        ws = wb["Summary"]
+        for row in range(1, ws.max_row + 1):
+            val = ws.cell(row=row, column=2).value
+            if val and "of" in str(val) and "%" in str(val):
+                found_stats = True
+                break
 
-    results = [{"check": "has_stats", "passed": found_stats, "actual": found_stats}]
+    results = [
+        {"check": "has_summary_tab", "passed": found_summary, "actual": wb.sheetnames},
+        {"check": "has_stats", "passed": found_stats, "actual": found_stats},
+    ]
     wb.close()
     Path(out_path).unlink(missing_ok=True)
     for r in results:
@@ -231,19 +239,14 @@ def test_end_to_end():
     wb = load_workbook(path)
     results.append({"check": "e2e_has_matched_sheet", "passed": "Matched" in wb.sheetnames, "actual": wb.sheetnames})
     results.append({"check": "e2e_has_analysis_sheet", "passed": "Analysis" in wb.sheetnames, "actual": wb.sheetnames})
-    results.append({"check": "e2e_two_sheets_only", "passed": len(wb.sheetnames) == 2, "actual": wb.sheetnames})
+    results.append({"check": "e2e_has_expected_sheets", "passed": set(wb.sheetnames) >= {"Matched", "Analysis"}, "actual": wb.sheetnames})
 
     ws = wb["Matched"]
     results.append({"check": "e2e_matched_has_data", "passed": ws.max_row > 1, "actual": ws.max_row})
 
-    # Verify stats are present
-    found_stats = False
-    for row in range(ws.max_row, 0, -1):
-        val = ws.cell(row=row, column=1).value
-        if val and "Pipeline Stats" in str(val):
-            found_stats = True
-            break
-    results.append({"check": "e2e_has_stats", "passed": found_stats, "actual": found_stats})
+    # Verify Summary tab has stats
+    has_summary = "Summary" in wb.sheetnames
+    results.append({"check": "e2e_has_summary", "passed": has_summary, "actual": wb.sheetnames})
 
     wb.close()
     for r in results:
