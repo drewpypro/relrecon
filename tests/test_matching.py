@@ -519,6 +519,90 @@ def test_address_scoring_receives_aliases():
     )
 
 
+def test_name_tier_priority_follows_recipe_order():
+    """Name tier priority should use recipe list order, not hardcoded."""
+    source_df = pl.DataFrame({
+        "name": ["acme corp"],
+        "record_key": ["RK001"],
+    })
+    dest_df = pl.DataFrame({
+        "name": ["acme corp"],
+        "vendor_id": ["V001"],
+    })
+
+    # Both raw and clean match (already lowercase). With [clean, raw],
+    # clean should win because it's first in the list.
+    matched = match_names_exact(
+        source_df, dest_df, "name", "name",
+        tiers=["clean", "raw"], dedup_field="record_key",
+    )
+    assert matched.height == 1
+    assert matched["match_tier"][0] == "clean"
+
+    # Reversed: raw first should win
+    matched2 = match_names_exact(
+        source_df, dest_df, "name", "name",
+        tiers=["raw", "clean"], dedup_field="record_key",
+    )
+    assert matched2["match_tier"][0] == "raw"
+
+
+def test_address_tiers_from_recipe():
+    """Address scoring should respect tiers from address_support config."""
+    source_df = pl.DataFrame({
+        "name": ["Acme Corp"],
+        "record_key": ["RK001"],
+        "hq_addr1": ["123 Main Blvd"],
+        "hq_addr2": [""],
+    })
+    dest_df = pl.DataFrame({
+        "name": ["Acme Corp"],
+        "vendor_id": ["V001"],
+        "Address1": ["123 Main Boulevard"],
+        "Address2": [""],
+    })
+
+    step_raw_only = {
+        "name": "Test raw only",
+        "source": "pop1", "destination": "core_parent",
+        "match_fields": [{"source": "name", "destination": "name",
+                          "method": "exact", "tiers": ["raw"]}],
+        "address_support": {
+            "source": ["hq_addr1", "hq_addr2"],
+            "destination": ["Address1", "Address2"],
+            "parser": "default",
+            "tiers": ["raw"],
+        },
+    }
+
+    step_all = {
+        "name": "Test all tiers",
+        "source": "pop1", "destination": "core_parent",
+        "match_fields": [{"source": "name", "destination": "name",
+                          "method": "exact", "tiers": ["raw"]}],
+        "address_support": {
+            "source": ["hq_addr1", "hq_addr2"],
+            "destination": ["Address1", "Address2"],
+            "parser": "default",
+            # no tiers -- defaults to [raw, clean, normalized]
+        },
+    }
+
+    aliases = {"blvd": "boulevard"}
+
+    m_raw = run_matching_step(source_df, dest_df, step_raw_only,
+                              aliases=aliases, dedup_field="record_key")
+    m_all = run_matching_step(source_df, dest_df, step_all,
+                              aliases=aliases, dedup_field="record_key")
+
+    assert m_raw.height == 1
+    assert m_all.height == 1
+    # Raw-only should report raw tier
+    assert m_raw["addr_tier"][0] == "raw"
+    # All tiers with aliases should find normalized scores higher
+    assert m_all["addr_score"][0] >= m_raw["addr_score"][0]
+
+
 def test_address_scoring_fuzzy_collision():
     """Fuzzy match with colliding address columns must use dest side."""
     source_df = pl.DataFrame({

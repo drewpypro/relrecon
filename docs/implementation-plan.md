@@ -1,7 +1,10 @@
 # Implementation Plan: L1 Reconciliation Matching Engine
 
-**ADR-001 Status:** Accepted (Option C: Polars + RapidFuzz + optional libpostal)
-**Implementation Status:** All 5 phases complete and merged. 180 tests. Fuzzy matching, schema validation, run summaries, and many refinements added post-Phase 5 (see PR History). This document is retained as architectural reference.
+**ADR-001 Status:** Accepted (Option C: Polars + RapidFuzz + optional libpostal)  
+**Implementation Status:** All 5 phases complete and merged.
+180 tests.
+Fuzzy matching, schema validation, run summaries, and many refinements added post-Phase 5 (see PR History).
+This document is retained as architectural reference.
 
 ---
 
