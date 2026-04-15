@@ -50,7 +50,7 @@ python -m src --analyze data/your_file.csv --save-config config/suggested/
 | `--analyze FILE` | Run signal analysis instead of matching pipeline | -- |
 | `--columns` | `auto` to detect name/address, or comma-separated names | All string columns |
 | `--sections` | Filter report: quality, tokens, stopwords, aliases, unicode, suggestions | All |
-| `--top N` | Max items per section (0 = show all) | 15 |
+| `--top N` | Max items per section (0 = show all). Display only -- `--save-config` always writes full data | 15 |
 | `--save-config DIR` | Write suggested `stopwords.json` and `aliases.json` to DIR (must exist) | Don't write |
 
 ## What the Report Shows

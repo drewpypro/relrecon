@@ -76,11 +76,14 @@ def format_report(results: dict, file_path: str = "",
                 lines.append("")
                 lines.append("| Token | Frequency | Known |")
                 lines.append("|---|---|---|")
-                for sw in stopwords:
+                show_sw = stopwords[:top_n] if top_n else stopwords
+                for sw in show_sw:
                     known = "yes" if sw.get("known") else ""
                     lines.append(
                         f"| {sw['token']} | {sw['frequency']:.0%} | {known} |"
                     )
+                if top_n and len(stopwords) > top_n:
+                    lines.append(f"| ... | {len(stopwords) - top_n} more | |")
                 lines.append("")
 
         # Suggested aliases
@@ -132,6 +135,7 @@ def format_report(results: dict, file_path: str = "",
             }
             if non_ascii_buckets and col_name in results.get("_raw_series", {}):
                 raw_series = results["_raw_series"][col_name]
+                max_rows = top_n or len(raw_series)
                 sample_rows = []
                 for idx, val in enumerate(raw_series):
                     if val is None:
@@ -139,7 +143,7 @@ def format_report(results: dict, file_path: str = "",
                     s = str(val)
                     if any(ord(c) > 127 for c in s):
                         sample_rows.append((idx, s))
-                    if len(sample_rows) >= 20:
+                    if len(sample_rows) >= max_rows:
                         break
                 if sample_rows:
                     total_non_ascii = sum(
@@ -155,9 +159,9 @@ def format_report(results: dict, file_path: str = "",
                     lines.append("|---|---|")
                     for idx, val in sample_rows:
                         lines.append(f"| {idx + 1} | {val[:80]} |")
-                    if total_non_ascii > 20:
+                    if total_non_ascii > max_rows:
                         lines.append(
-                            f"| ... | {total_non_ascii - 20} more rows |"
+                            f"| ... | {total_non_ascii - max_rows} more rows |"
                         )
                     lines.append("")
 
