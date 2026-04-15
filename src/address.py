@@ -281,7 +281,8 @@ def score_address_pair(addr_src: dict, addr_dst: dict,
                        tier: str = "clean",
                        parser: str = "auto",
                        aliases: Optional[dict] = None,
-                       stopwords: Optional[list] = None) -> dict:
+                       stopwords: Optional[list] = None,
+                       street_weight: float = 0.6) -> dict:
     """Score a pair of address variants.
 
     Compares all combinations (merged<>merged, addr1<>addr2, etc.)
@@ -294,6 +295,7 @@ def score_address_pair(addr_src: dict, addr_dst: dict,
         parser: Address parser mode
         aliases: Alias dict for normalized tier
         stopwords: Stopword list for normalized tier
+        street_weight: Weight for street name component (0.0-1.0, default 0.6)
 
     Returns:
         Dict with: best_score, best_comparison, street_match, tier_used,
@@ -344,9 +346,9 @@ def score_address_pair(addr_src: dict, addr_dst: dict,
             )
             street_match = street_score >= 80
 
-        # Weighted score: street name boosted
-        if street_match:
-            weighted = (street_score * 0.6) + (full_score * 0.4)
+        # Weighted score: apply when both streets are parseable
+        if src_parsed["street_name"] and dst_parsed["street_name"]:
+            weighted = (street_score * street_weight) + (full_score * (1 - street_weight))
         else:
             weighted = full_score
 
@@ -370,7 +372,8 @@ def score_address_multi_tier(addr1_src: str, addr2_src: str,
                               tiers: list = None,
                               parser: str = "auto",
                               aliases: Optional[dict] = None,
-                              stopwords: Optional[list] = None) -> dict:
+                              stopwords: Optional[list] = None,
+                              street_weight: float = 0.6) -> dict:
     """Score addresses across multiple normalization tiers.
 
     Tries each tier in order, returns best result.
@@ -383,6 +386,7 @@ def score_address_multi_tier(addr1_src: str, addr2_src: str,
         parser: Address parser mode
         aliases: For normalized tier
         stopwords: For normalized tier
+        street_weight: Weight for street name component (0.0-1.0, default 0.6)
 
     Returns:
         Best score result across all tiers with tier_used indicated
@@ -400,6 +404,7 @@ def score_address_multi_tier(addr1_src: str, addr2_src: str,
             src_variants, dst_variants,
             tier=tier, parser=parser,
             aliases=aliases, stopwords=stopwords,
+            street_weight=street_weight,
         )
         if result["best_score"] > best["best_score"]:
             best = result

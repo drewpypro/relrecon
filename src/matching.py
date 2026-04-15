@@ -260,14 +260,15 @@ def score_addresses_batch(matched_df: pl.DataFrame,
                           parser: str = "auto",
                           aliases: dict = None,
                           stopwords: list = None,
-                          tiers: list = None) -> pl.DataFrame:
+                          tiers: list = None,
+                          street_weight: float = 0.6) -> pl.DataFrame:
     """Score address pairs using Phase 3 address module.
 
     Uses score_address_multi_tier which:
     - Builds variants and cross-compares (merged, a1-a1, a1-a2, a2-a1, a2-a2)
     - Parses via libpostal or built-in tokenizer for street name extraction
     - Applies normalization tiers (default: raw, clean, normalized)
-    - Weights street name match at 60/40
+    - Weights street name component (default 0.6 street + 0.4 full string)
 
     Iterates over matched pairs (post-join, not N×M).
     """
@@ -292,6 +293,7 @@ def score_addresses_batch(matched_df: pl.DataFrame,
             parser=parser,
             aliases=aliases,
             stopwords=stopwords,
+            street_weight=street_weight,
         )
         scores.append(result["best_score"])
         street_matches.append(result.get("street_match", False))
@@ -427,6 +429,7 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             aliases=aliases,
             stopwords=stopwords,
             tiers=ac.get("tiers"),
+            street_weight=ac.get("weights", {}).get("street_name", 0.6),
         )
 
         if "threshold" in ac and "addr_score" in matched.columns:

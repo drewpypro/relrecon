@@ -41,9 +41,11 @@ def test_no_name_match_reason():
     u = res["unmatched"]
 
     no_match = u.filter(pl.col("reason_code") == "no_name_match")
-    # With default thresholds, all unmatched should be no_name_match
-    assert no_match.height == u.height
-    # These should have no rejection_step or score
+    # Most unmatched should be no_name_match; some may be addr_below_threshold
+    # when street weighting penalizes different-street pairs
+    assert no_match.height > 0
+    assert no_match.height + u.filter(pl.col("reason_code") == "addr_below_threshold").height == u.height
+    # no_name_match rows should have no rejection_step or score
     assert no_match["rejection_step"].null_count() == no_match.height
 
 
