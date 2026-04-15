@@ -134,7 +134,7 @@ weighted:   100 * 0.6 + 100 * 0.4 = 100.0
 | Address fields (source/dest) | Recipe `address_support.source/destination` | Yes |
 | Parser mode (auto/libpostal/default) | Recipe `address_support.parser` | Yes |
 | Score threshold | Recipe `address_support.threshold` | Yes |
-| Tiers tried | Hardcoded in `score_address_multi_tier` | No -- always raw, clean, normalized |
+| Tiers tried | Recipe `address_support.tiers` | Yes -- default `[raw, clean, normalized]` |
 | Street weight (60/40) | Hardcoded in `score_address_pair` | No |
 | Street match threshold (>=80) | Hardcoded in `score_address_pair` | No |
 | Comparisons tried | Hardcoded in `score_address_pair` | No -- always all 5 combinations |
@@ -187,9 +187,14 @@ The threshold just says "this match isn't good enough, try the next step."
 
 ## Name Tiers vs Address Tiers
 
-The recipe `match_fields.tiers` setting (e.g. `[raw, clean]`) only controls **name matching**.
-Address scoring always tries all three tiers (raw, clean, normalized) regardless of what the recipe specifies.
-See [ADR-002](adr/002-tier-configuration-strategy.md) for a proposal to make address tiers configurable.
+Name and address tiers are independent systems with independent config (ADR-002, Option B):
+
+- **Name tiers**: `match_fields.tiers` -- controls which tiers are tried for name matching.
+  Position in list = priority (first wins ties).
+
+- **Address tiers**: `address_support.tiers` -- controls which tiers are tried for address scoring.
+  Default: `[raw, clean, normalized]` when omitted.
+  Position in list determines tie-breaking (first tier wins at equal scores).
 
 ## Reserved Column Names
 

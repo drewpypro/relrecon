@@ -49,7 +49,8 @@ steps:
       source: [hq_addr1, hq_addr2]
       destination: [Address1, Address2]
       parser: auto
-      threshold: 60
+      threshold: 75
+      tiers: [clean]
     date_gate:
       field: Updated
       max_age_years: 2
@@ -72,7 +73,8 @@ steps:
       source: [hq_addr1, hq_addr2]
       destination: [hq_addr1, hq_addr2]
       parser: auto
-      threshold: 60
+      threshold: 75
+      tiers: [clean]
     date_gate:
       field: cntrct_cmpl_dt
       max_age_years: 2
@@ -98,7 +100,8 @@ steps:
       source: [hq_addr1, hq_addr2]
       destination: [Address1, Address2]
       parser: auto
-      threshold: 60
+      threshold: 75
+      tiers: [clean]
     date_gate:
       field: Updated
       max_age_years: 2
@@ -123,7 +126,8 @@ steps:
       source: [hq_addr1, hq_addr2]
       destination: [hq_addr1, hq_addr2]
       parser: auto
-      threshold: 60
+      threshold: 75
+      tiers: [clean]
     date_gate:
       field: cntrct_cmpl_dt
       max_age_years: 2

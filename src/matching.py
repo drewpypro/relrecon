@@ -106,7 +106,8 @@ def match_names_exact(source_df: pl.DataFrame, dest_df: pl.DataFrame,
         tiers = ["raw", "clean"]
 
     results = []
-    tier_priority = {"raw": 0, "clean": 1, "normalized": 2}
+    # Priority from position in recipe tier list (first = preferred)
+    tier_priority = {t: i for i, t in enumerate(tiers)}
 
     for tier in tiers:
         if tier == "raw":
@@ -175,7 +176,8 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
     }
     scorer_fn = scorer_map.get(scorer, rfuzz.token_sort_ratio)
 
-    tier_priority = {"raw": 0, "clean": 1, "normalized": 2}
+    # Priority from position in recipe tier list (first = preferred)
+    tier_priority = {t: i for i, t in enumerate(tiers)}
     results = []
 
     for tier in tiers:
@@ -226,7 +228,7 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
 
         matched = pl.concat([matched_src, matched_dst], how="horizontal")
         matched = matched.with_columns(
-            pl.Series("name_score", scores),
+            pl.Series("name_score", [round(s, 1) for s in scores]),
             pl.lit(tier).alias("match_tier"),
             pl.lit(tier_priority.get(tier, 99)).alias("_tier_priority"),
         )
@@ -257,17 +259,21 @@ def score_addresses_batch(matched_df: pl.DataFrame,
                           dst_a1: str, dst_a2: str,
                           parser: str = "auto",
                           aliases: dict = None,
-                          stopwords: list = None) -> pl.DataFrame:
+                          stopwords: list = None,
+                          tiers: list = None) -> pl.DataFrame:
     """Score address pairs using Phase 3 address module.
 
     Uses score_address_multi_tier which:
     - Builds variants and cross-compares (merged, a1-a1, a1-a2, a2-a1, a2-a2)
     - Parses via libpostal or built-in tokenizer for street name extraction
-    - Applies all normalization tiers (Raw -> Clean -> Normalized for addresses)
+    - Applies normalization tiers (default: raw, clean, normalized)
     - Weights street name match at 60/40
 
     Iterates over matched pairs (post-join, not N×M).
     """
+    if tiers is None:
+        tiers = ["raw", "clean", "normalized"]
+
     src_a1_vals = matched_df[src_a1].to_list()
     src_a2_vals = matched_df[src_a2].to_list()
     dst_a1_vals = matched_df[dst_a1].to_list()
@@ -282,7 +288,7 @@ def score_addresses_batch(matched_df: pl.DataFrame,
         result = score_address_multi_tier(
             str(s1 or ""), str(s2 or ""),
             str(d1 or ""), str(d2 or ""),
-            tiers=["raw", "clean", "normalized"],
+            tiers=tiers,
             parser=parser,
             aliases=aliases,
             stopwords=stopwords,
@@ -420,6 +426,7 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             parser=ac.get("parser", "auto"),
             aliases=aliases,
             stopwords=stopwords,
+            tiers=ac.get("tiers"),
         )
 
         if "threshold" in ac and "addr_score" in matched.columns:
