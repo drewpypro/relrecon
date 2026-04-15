@@ -98,43 +98,84 @@ def profile_column(series, ranges: Optional[dict] = None) -> dict:
     Accepts a Polars Series (calls .to_list()) or any iterable of strings.
     Returns summary stats: per-bucket totals, % of cells with unknown chars,
     flagged cells (high unknown %, mixed scripts).
+
+    Optimized: uses Polars to filter ASCII-only rows and only runs
+    per-character classification on non-ASCII cells.
     """
     if ranges is None:
         ranges = _load_ranges()
 
-    # Accept Polars Series or plain iterable
-    values = series.to_list() if hasattr(series, 'to_list') else list(series)
+    import polars as pl
+
+    # Normalize input to Polars Series
+    if not isinstance(series, pl.Series):
+        series = pl.Series(list(series))
+    s = series.cast(pl.String).fill_null("").str.strip_chars()
+
+    # Count non-empty cells (after stripping whitespace)
+    non_empty = s.str.len_chars() > 0
+    total_cells = int(non_empty.sum())
+    if total_cells == 0:
+        return {
+            "total_cells": 0, "bucket_totals": {},
+            "cells_with_unknown": 0, "cells_with_unknown_pct": 0.0,
+            "mixed_script_cells": 0, "flagged_indices": [],
+        }
+
+    # Fast path: count ASCII chars in bulk via Polars
+    # Total chars across all non-empty cells
+    char_lens = s.str.len_chars()
+    total_chars = int(char_lens.filter(non_empty).sum())
+
+    # Count ASCII alnum and punct/space chars using Polars regex
+    alnum_counts = s.str.count_matches(r'[0-9A-Za-z]')
+    punct_counts = s.str.count_matches(r'[\t\n\r \x0b\x0c!-/:-@\[-`{-~]')
+    total_alnum = int(alnum_counts.filter(non_empty).sum())
+    total_punct = int(punct_counts.filter(non_empty).sum())
+    total_ascii = total_alnum + total_punct
 
     bucket_totals = {}
+    if total_alnum > 0:
+        bucket_totals["ascii_alnum"] = total_alnum
+    if total_punct > 0:
+        bucket_totals["ascii_punct_space"] = total_punct
+
     cells_with_unknown = 0
     mixed_script_cells = 0
-    total_cells = 0
     flagged_set = set()
 
-    for i, val in enumerate(values):
-        if val is None or str(val).strip() == "":
-            continue
-        total_cells += 1
-        profile = profile_string(str(val), ranges)
+    # Only process non-ASCII cells (the expensive path)
+    non_ascii_chars = char_lens - alnum_counts - punct_counts
+    has_non_ascii = non_empty & (non_ascii_chars > 0)
+    non_ascii_count = int(has_non_ascii.sum())
 
-        for k, v in profile.items():
-            if k.startswith("_"):
+    if non_ascii_count > 0:
+        # Get indices and values of non-ASCII rows
+        idx_series = pl.arange(0, s.len(), eager=True).filter(has_non_ascii)
+        val_series = s.filter(has_non_ascii)
+
+        for orig_idx, val in zip(idx_series.to_list(), val_series.to_list()):
+            if not val:
                 continue
-            bucket_totals[k] = bucket_totals.get(k, 0) + v
+            profile = profile_string(val, ranges)
 
-        if profile.get("unknown", 0) > 0:
-            cells_with_unknown += 1
-        if profile["_unknown_pct"] > 20:
-            flagged_set.add(i)
+            for k, v in profile.items():
+                if k.startswith("_") or k in ("ascii_alnum", "ascii_punct_space"):
+                    continue
+                bucket_totals[k] = bucket_totals.get(k, 0) + v
 
-        # Check for mixed scripts (excluding ascii and common)
-        scripts = [
-            k for k, v in profile.items()
-            if not k.startswith("_") and k not in ("ascii_alnum", "ascii_punct_space", "common_unicode", "unknown") and v > 0
-        ]
-        if len(scripts) > 1:
-            mixed_script_cells += 1
-            flagged_set.add(i)
+            if profile.get("unknown", 0) > 0:
+                cells_with_unknown += 1
+            if profile["_unknown_pct"] > 20:
+                flagged_set.add(orig_idx)
+
+            scripts = [
+                k for k, v in profile.items()
+                if not k.startswith("_") and k not in ("ascii_alnum", "ascii_punct_space", "common_unicode", "unknown") and v > 0
+            ]
+            if len(scripts) > 1:
+                mixed_script_cells += 1
+                flagged_set.add(orig_idx)
 
     return {
         "total_cells": total_cells,
@@ -142,7 +183,7 @@ def profile_column(series, ranges: Optional[dict] = None) -> dict:
         "cells_with_unknown": cells_with_unknown,
         "cells_with_unknown_pct": round(cells_with_unknown / total_cells * 100, 1) if total_cells > 0 else 0.0,
         "mixed_script_cells": mixed_script_cells,
-        "flagged_indices": sorted(flagged_set)[:100],  # Cap at 100
+        "flagged_indices": sorted(flagged_set)[:100],
     }
 
 

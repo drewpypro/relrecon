@@ -135,14 +135,14 @@ def top_tokens(series: pl.Series, tier: str = "raw", n: int = 50) -> list[tuple[
     if tier not in ("raw", "clean"):
         raise ValueError(f"top_tokens only supports 'raw' or 'clean' tiers, got '{tier}'")
 
-    counter = Counter()
-    for val in series.drop_nulls().to_list():
-        s = str(val)
-        if tier == "clean":
-            s = clean(s)
-        tokens = s.split()
-        counter.update(tokens)
-    return counter.most_common(n)
+    s = series.drop_nulls().cast(pl.String)
+    if tier == "clean":
+        s = s.str.to_lowercase().str.replace_all(r'[,.;:]', '')
+    # Split, explode, filter empty, count
+    df = s.str.split(" ").explode().to_frame("tok")
+    df = df.filter(pl.col("tok") != "")
+    counts = df.group_by("tok").len().sort("len", descending=True).head(n)
+    return [(row[0], row[1]) for row in counts.iter_rows()]
 
 
 # ---------------------------------------------------------------------------
@@ -163,12 +163,15 @@ def suggest_stopwords(series: pl.Series, col_type: str = "name",
     if total_rows == 0:
         return []
 
-    # Count which rows each token appears in (not raw frequency)
-    row_counts = Counter()
-    for val in series.drop_nulls().to_list():
-        s = clean(str(val))
-        unique_tokens = set(s.split())
-        row_counts.update(unique_tokens)
+    # Clean, split, get unique tokens per row, then count across rows
+    cleaned = series.drop_nulls().cast(pl.String).str.to_lowercase().str.replace_all(r'[,.;:]', '')
+    # Each row -> list of unique tokens
+    per_row = cleaned.str.split(" ").map_elements(
+        lambda tokens: list(set(t for t in tokens if t)), return_dtype=pl.List(pl.String)
+    )
+    row_counts = per_row.explode().to_frame("tok").filter(
+        pl.col("tok") != ""
+    ).group_by("tok").len().sort("len", descending=True)
 
     # Known stopword candidates by type
     known_stopwords = {
@@ -180,7 +183,8 @@ def suggest_stopwords(series: pl.Series, col_type: str = "name",
     known = known_stopwords.get(col_type, set())
 
     suggestions = []
-    for token, count in row_counts.most_common(n * 3):  # Over-sample then filter
+    for row in row_counts.head(n * 3).iter_rows():
+        token, count = row[0], row[1]
         freq = count / total_rows
         if freq >= threshold or token in known:
             suggestions.append({
@@ -209,13 +213,14 @@ def suggest_aliases(series: pl.Series, n: int = 30) -> list:
 
     Does NOT detect semantic aliases (Blvd/Boulevard) -- those need a dictionary.
     """
-    raw_counter = Counter()
-    for val in series.drop_nulls().to_list():
-        tokens = str(val).split()
-        raw_counter.update(tokens)
+    # Tokenize and count via Polars
+    df = series.drop_nulls().cast(pl.String).str.split(" ").explode().to_frame("tok")
+    df = df.filter(pl.col("tok") != "")
+    token_counts = df.group_by("tok").len()
 
+    # Group by alias key in Python (complex regex per token)
     groups = {}
-    for token, count in raw_counter.items():
+    for token, count in token_counts.iter_rows():
         key = _alias_group_key(token)
         if not key:
             continue
