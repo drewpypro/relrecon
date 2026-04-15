@@ -209,6 +209,19 @@
                   "normalized"
                 ],
                 "description": "Normalization tiers to try for address scoring. Default: all three. Order determines tie-breaking (first wins)."
+              },
+              "weights": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "street_name": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.6,
+                    "description": "Weight for street name component in address scoring (0.0-1.0). Remainder goes to full string score. Default: 0.6 (60% street + 40% full string). Applied whenever both addresses have a parseable street name."
+                  }
+                }
               }
             }
           },

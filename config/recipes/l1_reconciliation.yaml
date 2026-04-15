@@ -51,6 +51,8 @@ steps:
       parser: auto
       threshold: 75
       tiers: [clean]
+      weights:
+        street_name: 0.6
     date_gate:
       field: Updated
       max_age_years: 2
@@ -75,6 +77,8 @@ steps:
       parser: auto
       threshold: 75
       tiers: [clean]
+      weights:
+        street_name: 0.6
     date_gate:
       field: cntrct_cmpl_dt
       max_age_years: 2
@@ -102,6 +106,8 @@ steps:
       parser: auto
       threshold: 75
       tiers: [clean]
+      weights:
+        street_name: 0.6
     date_gate:
       field: Updated
       max_age_years: 2
@@ -128,6 +134,8 @@ steps:
       parser: auto
       threshold: 75
       tiers: [clean]
+      weights:
+        street_name: 0.6
     date_gate:
       field: cntrct_cmpl_dt
       max_age_years: 2

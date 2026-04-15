@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 import polars as pl
 from recipe import load_recipe, load_source, filter_population, build_filter_expr, validate_recipe
-from matching import apply_date_gate, match_names_exact, match_names_fuzzy, run_matching_step, run_pipeline
+from matching import apply_date_gate, match_names_exact, match_names_fuzzy, run_matching_step, run_pipeline, score_addresses_batch
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 RECIPE_PATH = Path(__file__).parent.parent / "config" / "recipes" / "l1_reconciliation.yaml"
@@ -647,6 +647,158 @@ def test_address_scoring_fuzzy_collision():
 
 
 # --- Runner ---
+
+def test_street_weight_penalizes_different_streets():
+    """Different streets with similar city/state should be penalized."""
+    # Same city/state gives high full_score, but streets differ
+    matched = pl.DataFrame({
+        "src_a1": ["100 Harris St Sydney NSW 2000"],
+        "src_a2": [""],
+        "dst_a1": ["73 James St Sydney NSW 2000"],
+        "dst_a2": [""],
+    })
+    # Default weight (0.6) -- different streets pull score down
+    result = score_addresses_batch(
+        matched, "src_a1", "src_a2", "dst_a1", "dst_a2",
+        tiers=["clean"],
+    )
+    weighted_score = result["addr_score"][0]
+
+    # Compare with weight=0 (full string only -- old-style no penalty)
+    result_no_weight = score_addresses_batch(
+        matched, "src_a1", "src_a2", "dst_a1", "dst_a2",
+        tiers=["clean"],
+        street_weight=0.0,
+    )
+    full_only_score = result_no_weight["addr_score"][0]
+
+    # With different streets, weighted score should be LOWER than full-string-only
+    assert weighted_score < full_only_score, \
+        f"Weighted {weighted_score} should be < full-only {full_only_score}"
+
+
+def test_street_weight_boosts_same_streets():
+    """Same streets should still get boosted."""
+    matched = pl.DataFrame({
+        "src_a1": ["100 Harris St Level 2"],
+        "src_a2": [""],
+        "dst_a1": ["100 Harris St Level 1"],
+        "dst_a2": [""],
+    })
+    result = score_addresses_batch(
+        matched, "src_a1", "src_a2", "dst_a1", "dst_a2",
+        tiers=["clean"],
+    )
+    result_no_weight = score_addresses_batch(
+        matched, "src_a1", "src_a2", "dst_a1", "dst_a2",
+        tiers=["clean"],
+        street_weight=0.0,
+    )
+    # Same street = high street_score, so weighting should boost
+    assert result["addr_score"][0] >= result_no_weight["addr_score"][0]
+
+
+def test_street_weight_fallback_unparseable():
+    """When street can't be parsed, falls back to full string score."""
+    matched = pl.DataFrame({
+        "src_a1": ["PO Box 1234"],
+        "src_a2": [""],
+        "dst_a1": ["PO Box 1234"],
+        "dst_a2": [""],
+    })
+    result = score_addresses_batch(
+        matched, "src_a1", "src_a2", "dst_a1", "dst_a2",
+        tiers=["clean"],
+    )
+    # PO Box has no street name -- should fall back to full string
+    assert result["addr_score"][0] == 100.0
+
+
+def test_street_weight_configurable_via_recipe():
+    """Street weight flows through from recipe address_support.weights."""
+    # Same city/state, different street -- weight affects penalty magnitude
+    src = pl.DataFrame({
+        "name": ["Acme Corp"], "record_key": ["RK1"],
+        "addr1": ["100 Harris St Sydney NSW 2000"], "addr2": [""],
+    })
+    dst = pl.DataFrame({
+        "name": ["Acme Corp"], "vendor_id": ["V1"],
+        "addr1": ["73 James St Sydney NSW 2000"], "addr2": [""],
+    })
+
+    step_heavy = {
+        "name": "Heavy weight",
+        "source": "pop1", "destination": "core_parent",
+        "match_fields": [{"source": "name", "destination": "name",
+                          "method": "exact", "tiers": ["raw", "clean"]}],
+        "address_support": {
+            "source": ["addr1", "addr2"],
+            "destination": ["addr1", "addr2"],
+            "parser": "default",
+            "weights": {"street_name": 0.8},
+        },
+    }
+    step_light = {
+        "name": "Light weight",
+        "source": "pop1", "destination": "core_parent",
+        "match_fields": [{"source": "name", "destination": "name",
+                          "method": "exact", "tiers": ["raw", "clean"]}],
+        "address_support": {
+            "source": ["addr1", "addr2"],
+            "destination": ["addr1", "addr2"],
+            "parser": "default",
+            "weights": {"street_name": 0.2},
+        },
+    }
+
+    m_heavy = run_matching_step(src, dst, step_heavy, dedup_field="record_key")
+    m_light = run_matching_step(src, dst, step_light, dedup_field="record_key")
+
+    # Different streets: heavier weight = lower score (more penalty)
+    assert m_heavy["addr_score"][0] < m_light["addr_score"][0], \
+        f"Heavy {m_heavy['addr_score'][0]} should be < Light {m_light['addr_score'][0]}"
+
+
+def test_street_weight_default_when_omitted():
+    """No weights key in recipe should use default 0.6."""
+    src = pl.DataFrame({
+        "name": ["Acme Corp"], "record_key": ["RK1"],
+        "addr1": ["123 Main St"], "addr2": [""],
+    })
+    dst = pl.DataFrame({
+        "name": ["Acme Corp"], "vendor_id": ["V1"],
+        "addr1": ["456 Oak Blvd"], "addr2": [""],
+    })
+
+    step_no_weights = {
+        "name": "No weights",
+        "source": "pop1", "destination": "core_parent",
+        "match_fields": [{"source": "name", "destination": "name",
+                          "method": "exact", "tiers": ["raw", "clean"]}],
+        "address_support": {
+            "source": ["addr1", "addr2"],
+            "destination": ["addr1", "addr2"],
+            "parser": "default",
+        },
+    }
+    step_explicit_default = {
+        "name": "Explicit default",
+        "source": "pop1", "destination": "core_parent",
+        "match_fields": [{"source": "name", "destination": "name",
+                          "method": "exact", "tiers": ["raw", "clean"]}],
+        "address_support": {
+            "source": ["addr1", "addr2"],
+            "destination": ["addr1", "addr2"],
+            "parser": "default",
+            "weights": {"street_name": 0.6},
+        },
+    }
+
+    m1 = run_matching_step(src, dst, step_no_weights, dedup_field="record_key")
+    m2 = run_matching_step(src, dst, step_explicit_default, dedup_field="record_key")
+
+    assert m1["addr_score"][0] == m2["addr_score"][0]
+
 
 def run_all():
     all_results = {

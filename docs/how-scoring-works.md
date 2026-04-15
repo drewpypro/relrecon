@@ -54,7 +54,7 @@ Name matching runs first. Address scoring runs only on records that passed name 
 |---|---|---|---|
 | Signal analysis | Yes -- clean tier for token analysis | No | No |
 | Name matching | Yes -- tier depends on recipe `tiers` list | No | Only if `method: fuzzy` in recipe |
-| Address scoring | Yes -- all three tiers (hardcoded) | Yes -- street name extraction | Yes -- always (full + street score) |
+| Address scoring | Yes -- tiers from recipe `address_support.tiers` | Yes -- street name extraction | Yes -- always (full + street score) |
 
 Note: "fuzzy" in name matching (RapidFuzz cdist on names) and "fuzzy" in address scoring (RapidFuzz token_sort_ratio on addresses) are unrelated. Name matching method (exact/fuzzy) does not affect address scoring -- address scoring runs the same way on every matched pair regardless of how the name match was found.
 
@@ -75,8 +75,8 @@ For each address pair, per normalization tier:
 4. STREET     rfuzz.ratio(street_src, street_dst)
               produces street_score (0-100), street_match = (street_score >= 80)
                     │
-5. WEIGHT     street_match? weighted = street*0.6 + full*0.4
-              no street?    weighted = full_score
+5. WEIGHT     both streets parsed? weighted = street*weight + full*(1-weight)
+              can't parse street?  weighted = full_score
 ```
 
 This runs for each tier (raw, clean, normalized) and each comparison (merged<>merged, addr1<>addr1, addr1<>addr2, addr2<>addr1, addr2<>addr2).
@@ -127,6 +127,41 @@ weighted:   100 * 0.6 + 100 * 0.4 = 100.0
 
 **Result:** normalized tier wins with score 100.0, comparison addr1<>addr1, street_match true.
 
+### Street Name Weighting
+
+When both the source and destination addresses have a parseable street name, the score is a
+weighted blend of street similarity and full string similarity:
+
+```
+weighted = (street_score * street_weight) + (full_score * (1 - street_weight))
+```
+
+Default `street_weight` is `0.6` (60% street + 40% full string). This means:
+
+- **Same street, different unit:** street_score is high, full_score is high -- score stays high
+- **Different street, same city/state:** street_score is low, pulling the weighted score **down**
+- **Unparseable street:** falls back to 100% full string score (no penalty or boost)
+
+The `street_match` column in the report indicates whether street_score >= 80 (informational only --
+it does not gate the weighting).
+
+You can tune the weight in your recipe:
+
+```yaml
+address_support:
+  weights:
+    street_name: 0.7  # more aggressive street emphasis
+```
+
+| street_name weight | Same street (street=100, full=75) | Different street (street=33, full=75) |
+|---|---|---|
+| 0.4 | 90.0 | 58.3 |
+| 0.5 | 87.5 | 54.2 |
+| 0.6 (default) | 85.0 | 50.0 |
+| 0.7 | 82.5 | 45.8 |
+
+Higher weight = more separation between same-street and different-street pairs.
+
 ### What's Configurable vs Hardcoded
 
 | Setting | Where | Configurable? |
@@ -135,7 +170,7 @@ weighted:   100 * 0.6 + 100 * 0.4 = 100.0
 | Parser mode (auto/libpostal/default) | Recipe `address_support.parser` | Yes |
 | Score threshold | Recipe `address_support.threshold` | Yes |
 | Tiers tried | Recipe `address_support.tiers` | Yes -- default `[raw, clean, normalized]` |
-| Street weight (60/40) | Hardcoded in `score_address_pair` | No |
+| Street weight | Recipe `address_support.weights.street_name` | Yes -- default `0.6` (60% street + 40% full) |
 | Street match threshold (>=80) | Hardcoded in `score_address_pair` | No |
 | Comparisons tried | Hardcoded in `score_address_pair` | No -- always all 5 combinations |
 
@@ -146,9 +181,10 @@ The report shows several tier-related columns that can be confusing because they
 | Column | What it tells you | Set by |
 |---|---|---|
 | `match_tier` | Which normalization made the names join (how the pair was found) | Name matching |
-| `addr_score` | Best similarity score across all address tiers | Address scoring |
+| `addr_score` | Best weighted score across all address tiers (street + full string blend) | Address scoring |
 | `addr_tier` | Which tier produced that best score (informational only) | Address scoring |
 | `addr_comparison` | Which field combo scored best -- addr1<>addr1, merged<>merged, etc. (informational only) | Address scoring |
+| `addr_street_match` | Whether extracted street names are similar (street_score >= 80). **Informational only** -- does not gate scoring. True = streets match, False = streets differ or couldn't be parsed | Address scoring |
 
 `match_tier` and `addr_tier` are independent and often different.
 Example:
