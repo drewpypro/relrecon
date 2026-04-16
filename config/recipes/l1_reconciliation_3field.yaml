@@ -168,6 +168,8 @@ output:
         header: Source Address 1
       - field: hq_addr2
         header: Source Address 2
+      - field: hq_addr3
+        header: Source Address 3
       # Derived L1
       - field: derived_l1_name
         header: Derived L1 Name
@@ -195,6 +197,8 @@ output:
         header: Dest Address 1
       - fields: [Address2, hq_addr2_dst]
         header: Dest Address 2
+      - fields: [Address3, hq_addr3_dst]
+        header: Dest Address 3
     analysis:
       - field: l3_fmly_nm
         header: L3 Name
@@ -206,6 +210,8 @@ output:
         header: Address 1
       - field: hq_addr2
         header: Address 2
+      - field: hq_addr3
+        header: Address 3
       - field: l1_fmly_nm
         header: L1 Name (invalid)
       - field: tpty_l1_id
