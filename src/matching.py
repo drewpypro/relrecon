@@ -255,8 +255,7 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
 # ---------------------------------------------------------------------------
 
 def score_addresses_batch(matched_df: pl.DataFrame,
-                          src_a1: str, src_a2: str,
-                          dst_a1: str, dst_a2: str,
+                          src_cols: list, dst_cols: list,
                           parser: str = "auto",
                           aliases: dict = None,
                           stopwords: list = None,
@@ -265,30 +264,32 @@ def score_addresses_batch(matched_df: pl.DataFrame,
     """Score address pairs using Phase 3 address module.
 
     Uses score_address_multi_tier which:
-    - Builds variants and cross-compares (merged, a1-a1, a1-a2, a2-a1, a2-a2)
+    - Builds variants and cross-compares (merged + all NxN field combos)
     - Parses via libpostal or built-in tokenizer for street name extraction
     - Applies normalization tiers (default: raw, clean, normalized)
     - Weights street name component (default 0.6 street + 0.4 full string)
 
-    Iterates over matched pairs (post-join, not N×M).
+    Supports N source and M destination address columns.
+    Iterates over matched pairs (post-join, not N×M cartesian).
     """
     if tiers is None:
         tiers = ["raw", "clean", "normalized"]
 
-    src_a1_vals = matched_df[src_a1].to_list()
-    src_a2_vals = matched_df[src_a2].to_list()
-    dst_a1_vals = matched_df[dst_a1].to_list()
-    dst_a2_vals = matched_df[dst_a2].to_list()
+    # Read each address column into a list
+    src_val_lists = [matched_df[c].to_list() for c in src_cols]
+    dst_val_lists = [matched_df[c].to_list() for c in dst_cols]
+    n_rows = matched_df.height
 
     scores = []
     street_matches = []
     comparisons = []
     tiers_used = []
 
-    for s1, s2, d1, d2 in zip(src_a1_vals, src_a2_vals, dst_a1_vals, dst_a2_vals):
+    for row_i in range(n_rows):
+        src_addrs = [str(src_val_lists[c][row_i] or "") for c in range(len(src_cols))]
+        dst_addrs = [str(dst_val_lists[c][row_i] or "") for c in range(len(dst_cols))]
         result = score_address_multi_tier(
-            str(s1 or ""), str(s2 or ""),
-            str(d1 or ""), str(d2 or ""),
+            src_addrs, dst_addrs,
             tiers=tiers,
             parser=parser,
             aliases=aliases,
@@ -411,20 +412,16 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
     rejections = {}
     if "address_support" in step_config:
         ac = step_config["address_support"]
-        src_a1, src_a2 = ac["source"][0], ac["source"][1] if len(ac["source"]) > 1 else ac["source"][0]
-        dst_a1 = ac["destination"][0]
-        dst_a2 = ac["destination"][1] if len(ac["destination"]) > 1 else ac["destination"][0]
+        src_cols = list(ac["source"])
+        dst_cols = list(ac["destination"])
 
         # Prefer _dst suffixed columns (join disambiguation) over unsuffixed
         # (which is the source side when names collide).
-        if dst_a1 + "_dst" in matched.columns:
-            dst_a1 = dst_a1 + "_dst"
-        if dst_a2 + "_dst" in matched.columns:
-            dst_a2 = dst_a2 + "_dst"
+        dst_cols = [c + "_dst" if c + "_dst" in matched.columns else c for c in dst_cols]
 
         # Score using Phase 3 address module (multi-tier, street weighting, cross-compare)
         matched = score_addresses_batch(
-            matched, src_a1, src_a2, dst_a1, dst_a2,
+            matched, src_cols, dst_cols,
             parser=ac.get("parser", "auto"),
             aliases=aliases,
             stopwords=stopwords,

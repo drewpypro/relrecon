@@ -79,7 +79,12 @@ For each address pair, per normalization tier:
               can't parse street?  weighted = full_score
 ```
 
-This runs for each tier (raw, clean, normalized) and each comparison (merged<>merged, addr1<>addr1, addr1<>addr2, addr2<>addr1, addr2<>addr2).
+This runs for each tier (raw, clean, normalized) and each comparison pair.
+Comparisons are generated dynamically from the configured address columns:
+- **merged<>merged** (all fields concatenated)
+- **addrN<>addrM** for every source field N × destination field M
+
+With 2 fields per side: 5 comparisons (merged + 2×2). With 3 fields: 10 (merged + 3×3). With 4: 17.
 The best weighted score across all tiers and comparisons wins.
 
 **Why normalize before parse:** The parser sees cleaner input.
@@ -198,7 +203,7 @@ Default is `false` (backward compatible -- weighting only, no hard gate).
 | Street weight | Recipe `address_support.weights.street_name` | Yes -- default `0.6` (60% street + 40% full) |
 | Street match gate | Recipe `address_support.require_street_match` | Yes -- default `false` |
 | Street match threshold (>=80) | Hardcoded in `score_address_pair` | No |
-| Comparisons tried | Hardcoded in `score_address_pair` | No -- always all 5 combinations |
+| Comparisons tried | Dynamic from field count | No -- always merged + all N×M individual combos |
 
 ## Understanding the Report Columns
 
