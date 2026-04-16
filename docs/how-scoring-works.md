@@ -142,8 +142,8 @@ Default `street_weight` is `0.6` (60% street + 40% full string). This means:
 - **Different street, same city/state:** street_score is low, pulling the weighted score **down**
 - **Unparseable street:** falls back to 100% full string score (no penalty or boost)
 
-The `street_match` column in the report indicates whether street_score >= 80 (informational only --
-it does not gate the weighting).
+The `street_match` column in the report indicates whether street_score >= 80. By default this is
+informational only -- it does not gate the match. But see **Street Match Gate** below.
 
 You can tune the weight in your recipe:
 
@@ -162,6 +162,31 @@ address_support:
 
 Higher weight = more separation between same-street and different-street pairs.
 
+### Street Match Gate (require_street_match)
+
+For workflows where a different street name should **always** disqualify the match, enable the
+street match gate:
+
+```yaml
+address_support:
+  threshold: 75
+  require_street_match: true   # reject when street names differ
+```
+
+When `require_street_match: true`:
+
+- Records where `street_match` is false are **rejected** before the threshold check
+- Rejected records cascade to later steps (or appear in Analysis with reason_code `street_mismatch`)
+- The `best_rejected_score` still populates for transparency
+- Records where street names can't be parsed (no street extracted) are **not** rejected -- they fall back to the full string score as usual
+
+The gate runs **before** the threshold filter, so both can apply:
+
+1. Street gate rejects different-street pairs
+2. Threshold rejects remaining pairs with scores below cutoff
+
+Default is `false` (backward compatible -- weighting only, no hard gate).
+
 ### What's Configurable vs Hardcoded
 
 | Setting | Where | Configurable? |
@@ -171,6 +196,7 @@ Higher weight = more separation between same-street and different-street pairs.
 | Score threshold | Recipe `address_support.threshold` | Yes |
 | Tiers tried | Recipe `address_support.tiers` | Yes -- default `[raw, clean, normalized]` |
 | Street weight | Recipe `address_support.weights.street_name` | Yes -- default `0.6` (60% street + 40% full) |
+| Street match gate | Recipe `address_support.require_street_match` | Yes -- default `false` |
 | Street match threshold (>=80) | Hardcoded in `score_address_pair` | No |
 | Comparisons tried | Hardcoded in `score_address_pair` | No -- always all 5 combinations |
 
@@ -184,7 +210,7 @@ The report shows several tier-related columns that can be confusing because they
 | `addr_score` | Best weighted score across all address tiers (street + full string blend) | Address scoring |
 | `addr_tier` | Which tier produced that best score (informational only) | Address scoring |
 | `addr_comparison` | Which field combo scored best -- addr1<>addr1, merged<>merged, etc. (informational only) | Address scoring |
-| `addr_street_match` | Whether extracted street names are similar (street_score >= 80). **Informational only** -- does not gate scoring. True = streets match, False = streets differ or couldn't be parsed | Address scoring |
+| `addr_street_match` | Whether extracted street names are similar (street_score >= 80). Informational unless `require_street_match: true` (then it gates the match). True = streets match, False = streets differ or couldn't be parsed | Address scoring |
 
 `match_tier` and `addr_tier` are independent and often different.
 Example:

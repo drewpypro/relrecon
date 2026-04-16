@@ -432,6 +432,16 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             street_weight=ac.get("weights", {}).get("street_name", 0.6),
         )
 
+        # Street match gate: reject when street doesn't match (Issue #110)
+        if ac.get("require_street_match") and "addr_street_match" in matched.columns:
+            street_fail = matched.filter(~pl.col("addr_street_match"))
+            if collect_rejections and dedup_field and dedup_field in matched.columns:
+                if street_fail.height > 0:
+                    keys = street_fail[dedup_field].to_list()
+                    scores = street_fail["addr_score"].to_list()
+                    rejections["street_mismatch"] = dict(zip(keys, scores))
+            matched = matched.filter(pl.col("addr_street_match"))
+
         if "threshold" in ac and "addr_score" in matched.columns:
             cutoff = ac["threshold"]
             if collect_rejections and dedup_field and dedup_field in matched.columns:
@@ -633,6 +643,15 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
                                            dedup_field=track_field,
                                            collect_rejections=True)
         matched, rejections = step_result
+
+        if "street_mismatch" in rejections:
+            for key, score in rejections["street_mismatch"].items():
+                if key not in all_rejections:
+                    all_rejections[key] = {
+                        "reason": "street_mismatch",
+                        "step": step["name"],
+                        "best_addr_score": score,
+                    }
 
         if "addr_below_threshold" in rejections:
             for key, score in rejections["addr_below_threshold"].items():

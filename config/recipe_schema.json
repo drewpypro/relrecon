@@ -222,6 +222,11 @@
                     "description": "Weight for street name component in address scoring (0.0-1.0). Remainder goes to full string score. Default: 0.6 (60% street + 40% full string). Applied whenever both addresses have a parseable street name."
                   }
                 }
+              },
+              "require_street_match": {
+                "type": "boolean",
+                "default": false,
+                "description": "When true, reject address matches where street names differ (street_match is false). Rejected records cascade to later steps or appear in Analysis with reason_code 'street_mismatch'. Default: false (street weighting only, no hard gate)."
               }
             }
           },
