@@ -70,20 +70,24 @@ def _load_patterns(path: Optional[str] = None) -> dict:
 # Address variant building
 # ---------------------------------------------------------------------------
 
-def build_variants(addr1: str, addr2: str) -> dict:
-    """Build address variants from two address fields.
+def build_variants(*addrs: str) -> dict:
+    """Build address variants from N address fields.
 
-    Returns dict with: addr1_only, addr2_only, addr_merged
+    Accepts 1+ positional string args (addr1, addr2, ..., addrN).
+    Returns dict with: addr1_only, addr2_only, ..., addrN_only, addr_merged,
+    and fields (list of individual field values for iteration).
     """
-    a1 = str(addr1).strip() if addr1 else ""
-    a2 = str(addr2).strip() if addr2 else ""
-    merged = f"{a1} {a2}".strip()
+    cleaned = []
+    for a in addrs:
+        cleaned.append(str(a).strip() if a else "")
 
-    return {
-        "addr1_only": a1,
-        "addr2_only": a2,
-        "addr_merged": merged,
-    }
+    merged = " ".join(c for c in cleaned if c).strip()
+
+    result = {"addr_merged": merged, "fields": cleaned}
+    for i, val in enumerate(cleaned, start=1):
+        result[f"addr{i}_only"] = val
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -301,13 +305,13 @@ def score_address_pair(addr_src: dict, addr_dst: dict,
         Dict with: best_score, best_comparison, street_match, tier_used,
         street_src, street_dst
     """
-    comparisons = [
-        ("merged<>merged", addr_src["addr_merged"], addr_dst["addr_merged"]),
-        ("addr1<>addr1", addr_src["addr1_only"], addr_dst["addr1_only"]),
-        ("addr1<>addr2", addr_src["addr1_only"], addr_dst["addr2_only"]),
-        ("addr2<>addr1", addr_src["addr2_only"], addr_dst["addr1_only"]),
-        ("addr2<>addr2", addr_src["addr2_only"], addr_dst["addr2_only"]),
-    ]
+    # Build comparison pairs dynamically from N fields
+    comparisons = [("merged<>merged", addr_src["addr_merged"], addr_dst["addr_merged"])]
+    src_fields = addr_src.get("fields", [])
+    dst_fields = addr_dst.get("fields", [])
+    for si, sv in enumerate(src_fields, start=1):
+        for di, dv in enumerate(dst_fields, start=1):
+            comparisons.append((f"addr{si}<>addr{di}", sv, dv))
 
     best = {
         "best_score": 0.0,
@@ -367,8 +371,7 @@ def score_address_pair(addr_src: dict, addr_dst: dict,
 # Multi-tier address scoring
 # ---------------------------------------------------------------------------
 
-def score_address_multi_tier(addr1_src: str, addr2_src: str,
-                              addr1_dst: str, addr2_dst: str,
+def score_address_multi_tier(src_addrs: list, dst_addrs: list,
                               tiers: list = None,
                               parser: str = "auto",
                               aliases: Optional[dict] = None,
@@ -380,8 +383,8 @@ def score_address_multi_tier(addr1_src: str, addr2_src: str,
     Default tier order: raw -> clean -> normalized
 
     Args:
-        addr1_src, addr2_src: Source address fields
-        addr1_dst, addr2_dst: Destination address fields
+        src_addrs: List of source address field values
+        dst_addrs: List of destination address field values
         tiers: List of tiers to try (default: ['raw', 'clean', 'normalized'])
         parser: Address parser mode
         aliases: For normalized tier
@@ -394,8 +397,8 @@ def score_address_multi_tier(addr1_src: str, addr2_src: str,
     if tiers is None:
         tiers = ["raw", "clean", "normalized"]
 
-    src_variants = build_variants(addr1_src, addr2_src)
-    dst_variants = build_variants(addr1_dst, addr2_dst)
+    src_variants = build_variants(*src_addrs)
+    dst_variants = build_variants(*dst_addrs)
 
     best = {"best_score": 0.0, "tier_used": "none"}
 

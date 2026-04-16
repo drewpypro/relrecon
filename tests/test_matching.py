@@ -659,14 +659,14 @@ def test_street_weight_penalizes_different_streets():
     })
     # Default weight (0.6) -- different streets pull score down
     result = score_addresses_batch(
-        matched, "src_a1", "src_a2", "dst_a1", "dst_a2",
+        matched, ["src_a1", "src_a2"], ["dst_a1", "dst_a2"],
         tiers=["clean"],
     )
     weighted_score = result["addr_score"][0]
 
     # Compare with weight=0 (full string only -- old-style no penalty)
     result_no_weight = score_addresses_batch(
-        matched, "src_a1", "src_a2", "dst_a1", "dst_a2",
+        matched, ["src_a1", "src_a2"], ["dst_a1", "dst_a2"],
         tiers=["clean"],
         street_weight=0.0,
     )
@@ -686,11 +686,11 @@ def test_street_weight_boosts_same_streets():
         "dst_a2": [""],
     })
     result = score_addresses_batch(
-        matched, "src_a1", "src_a2", "dst_a1", "dst_a2",
+        matched, ["src_a1", "src_a2"], ["dst_a1", "dst_a2"],
         tiers=["clean"],
     )
     result_no_weight = score_addresses_batch(
-        matched, "src_a1", "src_a2", "dst_a1", "dst_a2",
+        matched, ["src_a1", "src_a2"], ["dst_a1", "dst_a2"],
         tiers=["clean"],
         street_weight=0.0,
     )
@@ -707,7 +707,7 @@ def test_street_weight_fallback_unparseable():
         "dst_a2": [""],
     })
     result = score_addresses_batch(
-        matched, "src_a1", "src_a2", "dst_a1", "dst_a2",
+        matched, ["src_a1", "src_a2"], ["dst_a1", "dst_a2"],
         tiers=["clean"],
     )
     # PO Box has no street name -- should fall back to full string

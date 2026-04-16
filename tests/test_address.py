@@ -40,13 +40,11 @@ def test_build_variants():
           "addr2_only": "",
           "addr_merged": ""}),
     ]
-    results = []
     for a1, a2, expected in cases:
         actual = build_variants(a1, a2)
-        passed = actual == expected
-        results.append({"input": [a1, a2], "expected": expected, "actual": actual, "passed": passed})
-    for r in results:
-        assert r["passed"], f"Failed: {r}"
+        for key, val in expected.items():
+            assert actual[key] == val, f"Failed {key}: expected {val!r}, got {actual[key]!r}"
+        assert actual["fields"] == [expected["addr1_only"], expected["addr2_only"]]
 
 
 def test_classify_tokens():
@@ -284,8 +282,8 @@ def test_score_address_swapped_columns():
 def test_score_multi_tier():
     """Multi-tier scoring should try raw -> clean -> normalized."""
     result = score_address_multi_tier(
-        "194 6TH AVE FL 7", "",
-        "194 6th Avenue Floor 7", "New York NY 10005",
+        ["194 6TH AVE FL 7", ""],
+        ["194 6th Avenue Floor 7", "New York NY 10005"],
         tiers=["raw", "clean", "normalized"],
         parser="default",
         aliases={"ave": "avenue", "fl": "floor"},
@@ -302,7 +300,7 @@ def test_score_multi_tier():
 
 def test_score_empty_addresses():
     """Handle empty/None addresses gracefully."""
-    result = score_address_multi_tier("", "", "", "",
+    result = score_address_multi_tier(["", ""], ["", ""],
                                       parser="default")
     results = []
     results.append({"check": "zero_score", "passed": result["best_score"] == 0.0,
@@ -325,8 +323,8 @@ def test_score_with_synthetic_data():
     core_row = core.filter(pl.col("Vendor ID") == "V322312").row(0, named=True)
 
     result = score_address_multi_tier(
-        pop1_row["hq_addr1"], pop1_row["hq_addr2"],
-        core_row["Address1"], core_row["Address2"],
+        [pop1_row["hq_addr1"], pop1_row["hq_addr2"]],
+        [core_row["Address1"], core_row["Address2"]],
         parser="default",
     )
     results.append({
@@ -339,8 +337,8 @@ def test_score_with_synthetic_data():
     # Different addresses should score low
     other_core = core.filter(pl.col("Vendor ID") == "V549283").row(0, named=True)
     result2 = score_address_multi_tier(
-        pop1_row["hq_addr1"], pop1_row["hq_addr2"],
-        other_core["Address1"], other_core["Address2"],
+        [pop1_row["hq_addr1"], pop1_row["hq_addr2"]],
+        [other_core["Address1"], other_core["Address2"]],
         parser="default",
     )
     results.append({
