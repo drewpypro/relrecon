@@ -2,8 +2,8 @@
 
 **Status:** Accepted  
 **Date:** 2026-04-11  
-**Author:** Bogoy (AI Assistant)  
-**Deciders:** Drew (bobturdhands)
+**Author:** Bogoy
+**Deciders:** Drew
 
 ---
 
@@ -146,7 +146,7 @@ libpostal handles parsing AND normalization in one step (e.g., "6th Ave" → "6t
 
 **Decision:** Use **libpostal** (via `pypostal` Python bindings) instead of usaddress.
 
-*Credit: [@realoksi](https://git.drewpy.pro/realoksi) suggested libpostal for its international coverage and Python bindings.*
+*Credit: [@realoksi](https://github.com/realoksi) suggested libpostal for its international coverage and Python bindings.*
 
 ### Dependencies
 
@@ -216,7 +216,7 @@ Current state (Option A/B) → Option C (immediate)
 
 ## Post-Decision Notes
 
-**Blocking strategy was not implemented.** The ADR presents blocking (grouping by state/city/zip to reduce comparison space) as a key advantage of Option C. RapidFuzz `process.cdist` handles the current dataset scale (~15k rows) efficiently, but no benchmarks have been run comparing blocking vs full cdist. The `blocks = pop1.group_by("parsed_state")` example above was never built. See [Issue #128](https://git.drewpy.pro/drewpypro/relational_matching/issues/128) for planned benchmarks.
+**Blocking strategy was not implemented.** The ADR presents blocking (grouping by state/city/zip to reduce comparison space) as a key advantage of Option C. RapidFuzz `process.cdist` handles the current dataset scale (~15k rows) efficiently, but no benchmarks have been run comparing blocking vs full cdist. The `blocks = pop1.group_by("parsed_state")` example above was never built. 
 
 **`process.extract` was superseded by `process.cdist`.** The Option C code example shows `process.extract()` for batch matching. The actual implementation uses `process.cdist()` exclusively -- it computes the full score matrix in C++ without Python loops, which is faster and simpler for this use case.
 

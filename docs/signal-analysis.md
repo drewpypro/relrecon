@@ -153,7 +153,7 @@ This is what gets written to files when you use `--save-config`.
 
 - **Signal analysis does not use libpostal.**
   It profiles raw text with basic tokenization.
-  See Issue #88 for future libpostal-powered address profiling.
+  Future libpostal-powered address profiling.
 
 - **Aliases detect punctuation variants beyond what clean() handles.**
   O'Brien/OBrien, AT&T/ATT, Co-Op/Coop will be grouped and saved.

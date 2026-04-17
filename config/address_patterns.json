@@ -24,6 +24,6 @@
     "\\d{5}",
     "\\d{5}-\\d{4}"
   ],
-  "_comment": "Sample address patterns for built-in tokenizer. Currently US-focused -- international patterns (UK, AU, EU, APAC) to be added. See Issue #5 for global dataset context.",
+  "_comment": "Sample address patterns for built-in tokenizer. Currently US-focused -- international patterns (UK, AU, EU, APAC) to be added.",
   "_regex_flavor": "Python re module. Patterns are compiled with re.IGNORECASE."
 }

@@ -429,7 +429,7 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             street_weight=ac.get("weights", {}).get("street_name", 0.6),
         )
 
-        # Street match gate: reject when street doesn't match (Issue #110)
+        # Street match gate: reject when street doesn't match
         if ac.get("require_street_match") and "addr_street_match" in matched.columns:
             street_fail = matched.filter(~pl.col("addr_street_match"))
             if collect_rejections and dedup_field and dedup_field in matched.columns:

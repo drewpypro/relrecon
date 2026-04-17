@@ -34,8 +34,8 @@ The only reliable field for the migrated records is the **child/vendor name (`l3
 > **Note:** The `source.type` field in the recipe (e.g. `type: trusted_reference`) is informational only -- it documents intent but has no runtime effect.
 
 > [!IMPORTANT]
-> Pop1's parent-level fields were populated with placeholder or incorrect data during migration. The recipe marks these as `invalid_fields` in the population config (currently informational only, see [Issue #74](https://git.drewpy.pro/drewpypro/relational_matching/issues/74)).
-> The `invalid_fields` key has no runtime effect currently -- it's informational only. See [Issue #74](https://git.drewpy.pro/drewpypro/relational_matching/issues/74) for future plans.
+> Pop1's parent-level fields were populated with placeholder or incorrect data during migration. The recipe marks these as `invalid_fields` in the population config (currently informational only).
+> The `invalid_fields` key has no runtime effect currently -- it's informational only for future plans.
 > The goal is to derive correct L1 by matching L3 names against trusted sources and inheriting the parent relationship.
 
 ## Datasets
