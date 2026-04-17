@@ -31,8 +31,11 @@ The only reliable field for the migrated records is the **child/vendor name (`l3
 | L1 (Parent/Supplier) | Supplier Name, Supplier ID | l1_fmly_nm, tpty_l1_id |
 | Address | Address1, Address2 | hq_addr1, hq_addr2 |
 
+> **Note:** The `source.type` field in the recipe (e.g. `type: trusted_reference`) is informational only -- it documents intent but has no runtime effect.
+
 > [!IMPORTANT]
-> Pop1's parent-level fields were populated with placeholder or incorrect data during migration. The recipe marks these as `invalid_fields` in the population config (currently informational only, see [Issue #74](https://github.com/drewpypro/relational_matching/issues/74)).
+> Pop1's parent-level fields were populated with placeholder or incorrect data during migration. The recipe marks these as `invalid_fields` in the population config (currently informational only).
+> The `invalid_fields` key has no runtime effect currently -- it's informational only for future plans.
 > The goal is to derive correct L1 by matching L3 names against trusted sources and inheriting the parent relationship.
 
 ## Datasets
@@ -82,7 +85,7 @@ The only reliable field for the migrated records is the **child/vendor name (`l3
 
 **Step 4: Fuzzy Pop1 -> Pop3.** Same as Step 2 but fuzzy at threshold 70.
 
-All steps run against **all** Pop1 records. In `best_match` mode (default), earlier steps win when multiple steps match the same record. Use `all_matches` mode in the recipe to see all candidates for analysis.
+All steps run against **all** Pop1 records -- the "cascade" is resolved at the end via dedup, not by excluding matched records from later steps. In `best_match` mode (default), dedup keeps the earliest step then highest scores when multiple steps match the same record. Use `all_matches` mode in the recipe to skip dedup and see all candidates for analysis.
 
 Address matching is **supporting evidence** in all steps, not standalone match criteria.
 
@@ -118,7 +121,7 @@ Core:  "194 6TH AVENUE FL 7 NY 10005"  -> street: 6th Avenue
 Street match: 100% | Token overlap: 67% | Weighted: ~85%
 ```
 
-**Key insight:** 60% overall + street match = strong signal. 90% overall with no street match = suspicious (matching on city/state/zip only).
+**Key insight:** 75% overall + street match = strong signal. 90% overall with no street match = suspicious (matching on city/state/zip only).
 
 </details>
 

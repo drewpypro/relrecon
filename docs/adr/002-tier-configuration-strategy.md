@@ -191,7 +191,7 @@ Document clearly in how-scoring-works.md that name tiers and address tiers are i
 
 ## Next Steps (if accepted)
 
-1. Fix name tier priority to use recipe order (Issue #92, ~3 lines)
+1. Fix name tier priority to use recipe order
 2. Add `address_support.tiers` config with default `[raw, clean, normalized]`
 3. Update recipe schema (`config/recipe_schema.json`)
 4. Update how-scoring-works.md and l1-recipe.md

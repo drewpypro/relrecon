@@ -1,4 +1,4 @@
-"""Tests for address threshold enforcement (Issue #49)."""
+"""Tests for address threshold enforcement"""
 
 import sys
 from pathlib import Path
@@ -28,7 +28,7 @@ def _load_with_threshold(threshold=None):
 def test_no_threshold_keeps_all():
     """Without threshold, all matches kept regardless of score.
 
-    Count is 33 after Issue #54 fix (dedup on vendor_id preserves records
+    Count is 33 after fix (dedup on vendor_id preserves records
     with duplicate l3_fmly_nm but different vendor_ids) + alias test data.
     """
     res = _load_with_threshold(threshold=None)

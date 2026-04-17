@@ -91,5 +91,5 @@
     [44032, 55203],
     [65440, 65500]
   ],
-  "_comment": "Unicode signal map from Issue #5. Code point ranges are inclusive [start, end]. Anything not matching is classified as 'unknown'."
+  "_comment": "Unicode signal map. Code point ranges are inclusive [start, end]. Anything not matching is classified as 'unknown'."
 }

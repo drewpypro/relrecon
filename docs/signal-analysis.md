@@ -50,8 +50,10 @@ python -m src --analyze data/your_file.csv --save-config config/suggested/
 | `--analyze FILE` | Run signal analysis instead of matching pipeline | -- |
 | `--columns` | `auto` to detect name/address, or comma-separated names | All string columns |
 | `--sections` | Filter report: quality, tokens, stopwords, aliases, unicode, suggestions | All |
-| `--top N` | Max items per section (0 = show all). Display only -- `--save-config` always writes full data | 15 |
+| `--top N` | Max items per section (0 = show all). Controls CLI display only -- does NOT affect `--save-config` output | 15 |
 | `--save-config DIR` | Write suggested `stopwords.json` and `aliases.json` to DIR (must exist) | Don't write |
+
+> **Note:** `--top` and `--save-config` are independent. `--top 5` caps the CLI display to 5 items per section but `--save-config` writes all suggestions that pass the frequency threshold (>= 0.2 or known patterns). The saved files are never affected by `--top`.
 
 ## What the Report Shows
 
@@ -151,7 +153,7 @@ This is what gets written to files when you use `--save-config`.
 
 - **Signal analysis does not use libpostal.**
   It profiles raw text with basic tokenization.
-  See Issue #88 for future libpostal-powered address profiling.
+  Future libpostal-powered address profiling.
 
 - **Aliases detect punctuation variants beyond what clean() handles.**
   O'Brien/OBrien, AT&T/ATT, Co-Op/Coop will be grouped and saved.

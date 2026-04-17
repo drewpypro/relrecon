@@ -1,5 +1,5 @@
 """
-Tests for Issue #54: dedup uses vendor_id instead of match field.
+Tests for Issue dedup uses vendor_id instead of match field.
 
 Verifies that records with the same l3_fmly_nm but different vendor_ids
 are preserved through exact matching, fuzzy matching, and the full pipeline.
