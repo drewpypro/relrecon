@@ -120,16 +120,29 @@ def validate_recipe(recipe: dict) -> list[str]:
         raise ValueError("Output missing 'format' field")
 
     source_pops = {step["source"] for step in recipe.get("steps", [])}
+    dest_pops = {step["destination"] for step in recipe.get("steps", [])}
     for pop_name in source_pops:
         pop_cfg = recipe.get("populations", {}).get(pop_name, {})
         if pop_cfg.get("action") == "exclude":
-            continue
+            raise ValueError(
+                f'Population "{pop_name}" has action: exclude but is used as a '
+                f'step source. Remove action: exclude -- it is only for garbage '
+                f'populations that should be subtracted from remainders.'
+            )
         if "record_key" not in pop_cfg:
             warnings.append(
                 f'Population "{pop_name}" has no record_key. '
                 "Dedup will fall back to match field -- records with "
                 "duplicate names may be collapsed. Set record_key to the "
                 "field that uniquely identifies each source record."
+            )
+
+    for pop_name in dest_pops:
+        pop_cfg = recipe.get("populations", {}).get(pop_name, {})
+        if pop_cfg.get("action") == "exclude":
+            warnings.append(
+                f'Population "{pop_name}" has action: exclude but is used as a '
+                f'step destination. This may produce unexpected results.'
             )
 
     return warnings

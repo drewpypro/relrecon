@@ -46,34 +46,68 @@ def _describe_filters(pop_cfg: dict) -> str:
     return f" {join_mode} ".join(parts)
 
 
-def _describe_step(step: dict, matched_count: int) -> dict:
-    """Extract step info into a flat dict for rendering."""
+def _describe_step_enhanced(step: dict, step_index: int, matched_count: int,
+                           total_matched: int, total_source: int,
+                           cumulative_matched: int) -> dict:
+    """Extract full step info into a flat dict for rendering."""
     mf = step.get("match_fields", [{}])[0]
     method = mf.get("method", "?")
     threshold = mf.get("threshold", 100 if method == "exact" else "?")
 
     addr = step.get("address_support", {})
-    addr_threshold = addr.get("threshold", "none")
+    addr_threshold = addr.get("threshold", None)
+    addr_tiers = addr.get("tiers", [])
 
     # Date filter from date_gate or filters
-    date_desc = "none"
+    date_desc = "-"
     dg = step.get("date_gate")
     if dg:
-        date_desc = f'{dg["field"]} within {dg["max_age_years"]} years'
+        applies = dg.get("applies_to", "")
+        suffix = f" ({applies})" if applies else ""
+        date_desc = f'{dg["field"].capitalize()} < {dg["max_age_years"]}yr{suffix}'
     else:
         for f in step.get("filters", []):
             if f.get("op") == "max_age_years":
-                date_desc = f'{f["field"]} within {f["value"]} years'
+                applies = f.get("applies_to", "")
+                suffix = f" ({applies})" if applies else ""
+                date_desc = f'{f["field"].capitalize()} < {f["value"]}yr{suffix}'
                 break
 
+    # Other conditions
+    conditions = []
+    if addr.get("require_street_match"):
+        conditions.append("require_street_match")
+    weights = addr.get("weights", {})
+    sw = weights.get("street_name", weights.get("street_weight", None))
+    if sw is not None and sw != 0.6:
+        conditions.append(f"street_weight={sw}")
+    scorer = mf.get("scorer")
+    if scorer and scorer != "token_sort_ratio":
+        conditions.append(f"scorer={scorer}")
+    other_cond = ", ".join(conditions) if conditions else "-"
+
+    # Percentages
+    pct_matched = round(matched_count / total_matched * 100, 1) if total_matched > 0 else 0.0
+    # % of leftovers = what fraction of the remaining pool this step matched
+    pool_before = total_source - (cumulative_matched - matched_count)
+    pct_leftovers = round(matched_count / pool_before * 100, 1) if pool_before > 0 else 0.0
+
     return {
-        "name": step.get("name", "?"),
-        "destination": step.get("destination", "?"),
+        "step": step_index,
+        "source_pop": step.get("source", "?"),
+        "source_col": mf.get("source", "?"),
+        "dest_pop": step.get("destination", "?"),
+        "dest_col": mf.get("destination", "?"),
         "method": method.capitalize(),
-        "name_threshold": f"{threshold}%" if isinstance(threshold, int) else threshold,
-        "addr_threshold": f"\u2265{addr_threshold}%" if isinstance(addr_threshold, (int, float)) else addr_threshold,
+        "data_tier": ", ".join(mf.get("tiers", [])) or "-",
+        "name_threshold": str(threshold) if method != "exact" and isinstance(threshold, (int, float)) else "-",
+        "addr_threshold": str(addr_threshold) if isinstance(addr_threshold, (int, float)) else "-",
+        "addr_tier": ", ".join(addr_tiers) if addr_tiers else "-",
         "date_filter": date_desc,
+        "other_conditions": other_cond,
         "matched": matched_count,
+        "pct_matched": f"{pct_matched}%",
+        "pct_leftovers": f"{pct_leftovers}%",
     }
 
 
@@ -154,16 +188,20 @@ def generate_summary(recipe: dict, stats: dict, matched_df: pl.DataFrame,
     # --- Step table ---
     lines.append("**Matching steps (in priority order):**")
     lines.append("")
-    lines.append("| Step | Against | Method | Name threshold | Address threshold | Date filter | Matched |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("| Step | Source Pop | Source Column | Dest Pop | Dest Column | Method | Data Tier | Name Threshold | Address Threshold | Address Tier | Date Filter | Other Conditions | Matched | % of Matched | % of Remaining |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 
+    cumulative = 0
     for i, step in enumerate(recipe.get("steps", []), 1):
         count = step_counts.get(step.get("name", ""), 0)
-        info = _describe_step(step, count)
+        cumulative += count
+        info = _describe_step_enhanced(step, i, count, matched, total, cumulative)
         lines.append(
-            f"| {i} | {info['destination']} | {info['method']} "
-            f"| {info['name_threshold']} | {info['addr_threshold']} "
-            f"| {info['date_filter']} | {info['matched']} |"
+            f"| {info['step']} | {info['source_pop']} | {info['source_col']} "
+            f"| {info['dest_pop']} | {info['dest_col']} | {info['method']} "
+            f"| {info['data_tier']} | {info['name_threshold']} | {info['addr_threshold']} "
+            f"| {info['addr_tier']} | {info['date_filter']} | {info['other_conditions']} "
+            f"| {info['matched']} | {info['pct_matched']} | {info['pct_leftovers']} |"
         )
 
     lines.append("")
@@ -384,20 +422,29 @@ def write_summary_tab(ws, recipe: dict, stats: dict, matched_df: pl.DataFrame,
     ws.cell(row=row, column=1, value="Matching steps (in priority order):").font = Font(bold=True)
     row += 1
 
-    headers = ["Step", "Against", "Method", "Name threshold", "Address threshold", "Date filter", "Matched"]
+    headers = [
+        "Step", "Source Pop", "Source Column", "Dest Pop", "Dest Column",
+        "Method", "Data Tier", "Name Threshold", "Address Threshold",
+        "Address Tier", "Date Filter", "Other Conditions",
+        "Matched", "% of Matched", "% of Remaining",
+    ]
     for ci, h in enumerate(headers, 1):
         cell = ws.cell(row=row, column=ci, value=h)
         cell.font = header_font_white
         cell.fill = header_fill
     row += 1
 
+    cumulative = 0
     for i, step in enumerate(recipe.get("steps", []), 1):
         count = step_counts.get(step.get("name", ""), 0)
-        info = _describe_step(step, count)
+        cumulative += count
+        info = _describe_step_enhanced(step, i, count, matched, total, cumulative)
         values = [
-            i, info["destination"], info["method"],
-            info["name_threshold"], info["addr_threshold"],
-            info["date_filter"], info["matched"],
+            info["step"], info["source_pop"], info["source_col"],
+            info["dest_pop"], info["dest_col"], info["method"],
+            info["data_tier"], info["name_threshold"], info["addr_threshold"],
+            info["addr_tier"], info["date_filter"], info["other_conditions"],
+            info["matched"], info["pct_matched"], info["pct_leftovers"],
         ]
         for ci, v in enumerate(values, 1):
             ws.cell(row=row, column=ci, value=v)
@@ -410,9 +457,10 @@ def write_summary_tab(ws, recipe: dict, stats: dict, matched_df: pl.DataFrame,
               "move to the next. A record is only unmatched if it fails all steps.",
     )
     note.alignment = wrap
-    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=7)
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(headers))
 
-    # Column widths
-    widths = [16, 20, 12, 18, 18, 28, 10]
-    for ci, w in enumerate(widths, 1):
-        ws.column_dimensions[chr(64 + ci)].width = w
+    # Column widths -- derive from header length + padding
+    for ci, h in enumerate(headers, 1):
+        col_letter = chr(64 + ci) if ci <= 26 else chr(64 + (ci - 1) // 26) + chr(65 + (ci - 1) % 26)
+        ws.column_dimensions[col_letter].width = max(len(h) + 4, 10)
+

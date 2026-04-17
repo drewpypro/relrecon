@@ -115,22 +115,22 @@ class TestGenerateSummary:
 
     def test_step_thresholds(self):
         md = generate_summary(_recipe(), _stats(), _matched_df())
-        assert "100%" in md  # exact name threshold
-        assert "70%" in md   # fuzzy name threshold
-        assert "≥60%" in md  # addr threshold step 1
-        assert "≥50%" in md  # addr threshold step 2
+        # Exact step: name threshold is "-", fuzzy step: "70"
+        assert "| - |" in md  # exact name threshold
+        assert "| 70 |" in md  # fuzzy name threshold
+        assert "| 60 |" in md  # addr threshold step 1
+        assert "| 50 |" in md  # addr threshold step 2
 
     def test_date_filter_from_date_gate(self):
         md = generate_summary(_recipe(), _stats(), _matched_df())
-        assert "updated within 2 years" in md
+        assert "Updated < 2yr" in md
 
     def test_date_filter_from_filters(self):
         """Step 2 uses filters instead of date_gate."""
         md = generate_summary(_recipe(), _stats(), _matched_df())
-        # Both steps should show date filter
         lines = md.split("\n")
         step_lines = [l for l in lines if l.startswith("| ")]
-        date_mentions = [l for l in step_lines if "within 2 years" in l]
+        date_mentions = [l for l in step_lines if "< 2yr" in l]
         assert len(date_mentions) >= 2
 
     def test_cascade_explanation(self):
