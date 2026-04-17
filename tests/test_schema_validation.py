@@ -251,3 +251,18 @@ class TestNewSchemaFeatures:
         r["populations"]["pop1"]["record_key"] = "vendor_id"
         warnings = validate_recipe(r)
         assert not any("record_key" in w for w in warnings)
+
+    def test_exclude_on_step_source_raises(self):
+        r = _make()
+        r["populations"]["pop1"]["action"] = "exclude"
+        import pytest
+        with pytest.raises(ValueError, match="action: exclude"):
+            validate_recipe(r)
+
+    def test_exclude_on_step_dest_warns(self):
+        r = _make()
+        r["populations"]["dest_pop"] = {"source": "src", "filter": []}
+        r["steps"][0]["destination"] = "dest_pop"
+        r["populations"]["dest_pop"]["action"] = "exclude"
+        warnings = validate_recipe(r)
+        assert any("action: exclude" in w and "destination" in w for w in warnings)
