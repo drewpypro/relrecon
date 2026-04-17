@@ -183,7 +183,7 @@ When `require_street_match: true`:
 - Records where `street_match` is false are **rejected** before the threshold check
 - Rejected records cascade to later steps (or appear in Analysis with reason_code `street_mismatch`)
 - The `best_rejected_score` still populates for transparency
-- Records where street names can't be parsed (no street extracted) are **not** rejected -- they fall back to the full string score as usual
+- Records where street names can't be parsed (no street extracted) **are** rejected -- `street_match` defaults to `False` when streets can't be parsed, and the gate checks `street_match`
 
 The gate runs **before** the threshold filter, so both can apply:
 
@@ -237,20 +237,22 @@ The tier tells you what normalization was applied internally to find the match o
 
 ## Address Threshold and Cascading
 
-When `address_support.threshold` is set (e.g. 60), it acts as a **cascade filter**, not a record deletion:
+When `address_support.threshold` is set (e.g. 75), it acts as a **quality filter**, not a record deletion:
 
-1. Record matches on name in Step 1 → address score = 45 → below threshold
+All steps run against **all** source records independently. The threshold doesn't remove records from later steps -- every step gets the full source population.
 
-2. Record is removed from Step 1 results but **cascades to Step 2**
+1. Record matches on name in Step 1 → address score = 45 → below threshold → rejected from Step 1
 
-3. Step 2 tries matching with a different destination population
+2. Step 2 also receives this record (along with every other source record) and tries matching against a different destination
 
-4. If Step 2 produces addr_score >= 60 → record is kept
+3. If Step 2 produces addr_score >= 75 → record is kept from Step 2
+
+4. At the end, dedup picks the best result per record (earliest step, then highest scores)
 
 5. If no step produces a passing score → record appears in the Analysis tab with `reason_code: addr_below_threshold` and `best_rejected_score: 45`
 
 No records are lost.
-The threshold just says "this match isn't good enough, try the next step."
+The threshold just says "this match isn't good enough" for that particular step.
 
 ## Name Tiers vs Address Tiers
 
@@ -261,7 +263,31 @@ Name and address tiers are independent systems with independent config (ADR-002,
 
 - **Address tiers**: `address_support.tiers` -- controls which tiers are tried for address scoring.
   Default: `[raw, clean, normalized]` when omitted.
-  Position in list determines tie-breaking (first tier wins at equal scores).
+  Position in list determines tie-breaking (last tier wins at equal scores -- the code uses strict `>`, so a later tier with an identical score replaces an earlier one).
+
+## Asymmetric Field Counts
+
+Source and destination can have different numbers of address fields. With 3 source and 2 destination fields: 1 + 3×2 = 7 comparisons. The code generates all cross-combinations regardless of whether the field counts match.
+
+In the report, `addr_comparison` reflects the actual fields compared -- you may see labels like `addr3<>addr1` when the source has more fields than the destination (or vice versa). The numbers correspond to position in the `address_support.source` and `address_support.destination` lists.
+
+## Reason Codes
+
+Unmatched records in the Analysis tab get a `reason_code` explaining why they didn't make it to the Matched tab:
+
+| Code | Meaning |
+|---|---|
+| `no_name_match` | No name match was found in any step -- the record never passed the name matching phase |
+| `addr_below_threshold` | Name matched in at least one step but the address score was below threshold in every step |
+| `street_mismatch` | Name matched but the street match gate rejected it (only when `require_street_match: true`) |
+
+The `rejection_step` column shows which step came closest and `best_rejected_score` shows the highest address score achieved before rejection.
+
+## record_key and Dedup
+
+The `record_key` field in a population config identifies the unique record identifier (e.g. `vendor_id`). It's critical for correct dedup behavior in `best_match` mode -- the pipeline deduplicates on this key to keep one result per source record.
+
+Without `record_key`, the pipeline falls back to the match field (e.g. `l3_fmly_nm`), which can collapse records that share the same name into a single result. A runtime warning is emitted when `record_key` is missing.
 
 ## Reserved Column Names
 

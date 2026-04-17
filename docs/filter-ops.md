@@ -70,9 +70,10 @@ populations:
         value: "V7"
 ```
 
-Multiple conditions default to `and` logic. Add `join: or` to any condition to switch:
+Multiple conditions default to `and` logic. Add `join: or` to switch. The `join` key can go on any condition dict in the list, or as its own standalone dict -- the first `join` found wins:
 
 ```yaml
+# Option A: join on a condition
 filter:
   - field: status
     op: eq
@@ -81,6 +82,16 @@ filter:
     op: eq
     value: "pending"
     join: or
+
+# Option B: join as standalone dict
+filter:
+  - field: status
+    op: eq
+    value: "active"
+  - field: status
+    op: eq
+    value: "pending"
+  - join: or
 ```
 
 ### Step filters (`steps.*.filters`)
