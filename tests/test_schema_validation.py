@@ -301,6 +301,85 @@ class TestNewSchemaFeatures:
         except ValueError as e:
             assert "errors)" not in str(e)
 
+
+# ---------------------------------------------------------------------------
+# step_defaults expansion
+# ---------------------------------------------------------------------------
+
+class TestStepDefaults:
+    def test_defaults_merged_into_steps(self):
+        """step_defaults values appear in steps after expansion."""
+        from src.recipe import _apply_step_defaults
+        r = _make()
+        r["step_defaults"] = {
+            "address_support": {
+                "source": ["a1"], "destination": ["a2"],
+                "parser": "auto", "threshold": 75,
+            }
+        }
+        expanded = _apply_step_defaults(copy.deepcopy(r))
+        assert expanded["steps"][0]["address_support"]["threshold"] == 75
+        assert expanded["steps"][0]["address_support"]["parser"] == "auto"
+        # step_defaults removed after expansion
+        assert "step_defaults" not in expanded
+
+    def test_step_values_override_defaults(self):
+        """Step-level values win over defaults."""
+        from src.recipe import _apply_step_defaults
+        r = _make()
+        r["step_defaults"] = {
+            "address_support": {
+                "source": ["a1"], "destination": ["a2"],
+                "parser": "auto", "threshold": 75,
+            }
+        }
+        r["steps"][0]["address_support"] = {
+            "source": ["x1"], "destination": ["x2"],
+            "parser": "default", "threshold": 60,
+        }
+        expanded = _apply_step_defaults(copy.deepcopy(r))
+        assert expanded["steps"][0]["address_support"]["threshold"] == 60
+        assert expanded["steps"][0]["address_support"]["parser"] == "default"
+
+    def test_deep_merge_nested_dicts(self):
+        """Deep merge handles nested dicts (e.g. weights inside address_support)."""
+        from src.recipe import _apply_step_defaults
+        r = _make()
+        r["step_defaults"] = {
+            "address_support": {
+                "source": ["a1"], "destination": ["a2"],
+                "weights": {"street_name": 0.6, "city": 0.2},
+            }
+        }
+        r["steps"][0]["address_support"] = {
+            "source": ["a1"], "destination": ["a2"],
+            "weights": {"street_name": 0.8},  # override street, keep city
+        }
+        expanded = _apply_step_defaults(copy.deepcopy(r))
+        weights = expanded["steps"][0]["address_support"]["weights"]
+        assert weights["street_name"] == 0.8  # overridden
+        assert weights["city"] == 0.2  # inherited from defaults
+
+    def test_no_defaults_is_noop(self):
+        """Recipe without step_defaults is unchanged."""
+        from src.recipe import _apply_step_defaults
+        r = _make()
+        original = copy.deepcopy(r)
+        expanded = _apply_step_defaults(r)
+        assert expanded["steps"] == original["steps"]
+
+    def test_schema_allows_step_defaults(self):
+        """step_defaults should not produce schema warnings."""
+        r = _make()
+        r["step_defaults"] = {
+            "address_support": {
+                "source": ["a1"], "destination": ["a2"],
+            }
+        }
+        # validate_recipe sees step_defaults before expansion -- should not warn
+        warnings = validate_recipe(r)
+        assert not any("step_defaults" in w for w in warnings)
+
     def test_exclude_on_step_dest_warns(self):
         r = _make()
         r["populations"]["dest_pop"] = {"source": "src", "filter": []}

@@ -46,11 +46,41 @@ def load_recipe(path: str) -> dict:
         else:
             recipe = json.load(f)
 
+    recipe = _apply_step_defaults(recipe)
     schema_warnings = validate_recipe(recipe)
     if schema_warnings:
         import sys
         for w in schema_warnings:
             print(f"[WARN] {w}", file=sys.stderr)
+    return recipe
+
+
+# ---------------------------------------------------------------------------
+# Step defaults
+# ---------------------------------------------------------------------------
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Deep-merge override into base. Override wins on conflicts."""
+    result = base.copy()
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def _apply_step_defaults(recipe: dict) -> dict:
+    """Merge step_defaults into each step (step values win on conflict).
+
+    Removes step_defaults from the recipe after applying so downstream
+    validation only sees fully-expanded steps.
+    """
+    defaults = recipe.pop("step_defaults", None)
+    if not defaults:
+        return recipe
+    for i, step in enumerate(recipe.get("steps", [])):
+        recipe["steps"][i] = _deep_merge(defaults, step)
     return recipe
 
 

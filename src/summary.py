@@ -122,7 +122,8 @@ def _format_timing(timing: dict) -> str:
 
 def generate_summary(recipe: dict, stats: dict, matched_df: pl.DataFrame,
                      timing: dict | None = None,
-                     mermaid: str = "default") -> str:
+                     mermaid: str = "default",
+                     recipe_file: str | None = None) -> str:
     """Generate a markdown run summary from recipe config + pipeline stats.
 
     Args:
@@ -131,6 +132,7 @@ def generate_summary(recipe: dict, stats: dict, matched_df: pl.DataFrame,
         matched_df: The matched DataFrame (for per-step counts)
         timing: Optional pipeline timing dict (load, setup, match, resolve)
         mermaid: Mermaid diagram mode. "default", "detailed", or "disabled"
+        recipe_file: Optional recipe filename for header metadata
 
     Returns:
         Markdown string
@@ -150,8 +152,10 @@ def generate_summary(recipe: dict, stats: dict, matched_df: pl.DataFrame,
 
     lines = []
     lines.append(f"# {name} -- Run Summary")
+    if recipe_file:
+        lines.append(f"**Recipe file:** `{recipe_file}`  ")
     if desc:
-        lines.append(f"\n*{desc}*")
+        lines.append(f"*{desc}*")
     lines.append("")
 
     # --- Populations ---
@@ -188,20 +192,22 @@ def generate_summary(recipe: dict, stats: dict, matched_df: pl.DataFrame,
     # --- Step table ---
     lines.append("**Matching steps (in priority order):**")
     lines.append("")
-    lines.append("| Step | Source Pop | Source Column | Dest Pop | Dest Column | Method | Data Tier | Name Threshold | Address Threshold | Address Tier | Date Filter | Other Conditions | Matched | % of Matched | % of Remaining |")
+    lines.append("| Step | Source Pop | Source Column | Dest Pop | Dest Column | Method | Data Tier | Name Threshold | Address Threshold | Address Tier | Date Filter | Other Conditions | Matched | % of Total | Leftover |")
     lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 
     cumulative = 0
     for i, step in enumerate(recipe.get("steps", []), 1):
         count = step_counts.get(step.get("name", ""), 0)
         cumulative += count
+        remaining = total - cumulative
         info = _describe_step_enhanced(step, i, count, matched, total, cumulative)
+        pct_of_total = round(count / total * 100, 1) if total > 0 else 0.0
         lines.append(
             f"| {info['step']} | {info['source_pop']} | {info['source_col']} "
             f"| {info['dest_pop']} | {info['dest_col']} | {info['method']} "
             f"| {info['data_tier']} | {info['name_threshold']} | {info['addr_threshold']} "
             f"| {info['addr_tier']} | {info['date_filter']} | {info['other_conditions']} "
-            f"| {info['matched']} | {info['pct_matched']} | {info['pct_leftovers']} |"
+            f"| {info['matched']} | {pct_of_total}% | {remaining} |"
         )
 
     lines.append("")
@@ -335,7 +341,8 @@ def generate_mermaid(recipe: dict, stats: dict, matched_df: pl.DataFrame | None 
 
 
 def write_summary_tab(ws, recipe: dict, stats: dict, matched_df: pl.DataFrame,
-                      timing: dict | None = None) -> None:
+                      timing: dict | None = None,
+                      recipe_file: str | None = None) -> None:
     """Write a Summary tab to an openpyxl worksheet.
 
     Args:
@@ -344,6 +351,7 @@ def write_summary_tab(ws, recipe: dict, stats: dict, matched_df: pl.DataFrame,
         stats: Pipeline stats dict
         matched_df: The matched DataFrame (for per-step counts)
         timing: Optional pipeline timing dict
+        recipe_file: Optional recipe filename for header metadata
     """
     from openpyxl.styles import Font, Alignment, PatternFill
 
@@ -374,6 +382,10 @@ def write_summary_tab(ws, recipe: dict, stats: dict, matched_df: pl.DataFrame,
     # Title
     ws.cell(row=row, column=1, value=f"{name} -- Run Summary").font = bold
     row += 1
+    if recipe_file:
+        ws.cell(row=row, column=1, value="Recipe file:").font = Font(bold=True)
+        ws.cell(row=row, column=2, value=recipe_file)
+        row += 1
     if desc:
         ws.cell(row=row, column=1, value=desc)
         row += 1
@@ -426,7 +438,7 @@ def write_summary_tab(ws, recipe: dict, stats: dict, matched_df: pl.DataFrame,
         "Step", "Source Pop", "Source Column", "Dest Pop", "Dest Column",
         "Method", "Data Tier", "Name Threshold", "Address Threshold",
         "Address Tier", "Date Filter", "Other Conditions",
-        "Matched", "% of Matched", "% of Remaining",
+        "Matched", "% of Total", "Leftover",
     ]
     for ci, h in enumerate(headers, 1):
         cell = ws.cell(row=row, column=ci, value=h)
@@ -438,13 +450,15 @@ def write_summary_tab(ws, recipe: dict, stats: dict, matched_df: pl.DataFrame,
     for i, step in enumerate(recipe.get("steps", []), 1):
         count = step_counts.get(step.get("name", ""), 0)
         cumulative += count
+        remaining = total - cumulative
         info = _describe_step_enhanced(step, i, count, matched, total, cumulative)
+        pct_of_total = f"{round(count / total * 100, 1)}%" if total > 0 else "0.0%"
         values = [
             info["step"], info["source_pop"], info["source_col"],
             info["dest_pop"], info["dest_col"], info["method"],
             info["data_tier"], info["name_threshold"], info["addr_threshold"],
             info["addr_tier"], info["date_filter"], info["other_conditions"],
-            info["matched"], info["pct_matched"], info["pct_leftovers"],
+            info["matched"], pct_of_total, remaining,
         ]
         for ci, v in enumerate(values, 1):
             ws.cell(row=row, column=ci, value=v)
