@@ -314,6 +314,28 @@
           ],
           "default": "best_match"
         },
+        "tie_breaker": {
+          "type": "object",
+          "description": "Tie-breaker for selecting among duplicate destination matches. Sorts by column value after stripping optional prefix.",
+          "additionalProperties": false,
+          "required": ["column"],
+          "properties": {
+            "column": {
+              "type": "string",
+              "description": "Destination column to sort by for tie-breaking"
+            },
+            "strip_prefix": {
+              "type": "string",
+              "description": "'alpha' strips all leading letters and parses the remainder as an integer for numeric sorting (e.g. 'S1013' -> 1013). Any other string is treated as a prefix to strip from the start of the value before sorting as text (e.g. 'S' strips leading 'S' only). Omit or set to empty string for plain string sorting."
+            },
+            "order": {
+              "type": "string",
+              "enum": ["asc", "desc"],
+              "default": "asc",
+              "description": "Sort order: 'asc' (lowest wins, default) or 'desc' (highest wins)"
+            }
+          }
+        },
         "tabs": {
           "type": "array",
           "items": {

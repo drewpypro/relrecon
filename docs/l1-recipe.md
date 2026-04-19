@@ -236,6 +236,8 @@ Excel workbook with three tabs:
 
 A markdown summary (`_summary.md`) is also generated alongside the Excel file with the same information plus a Mermaid cascade diagram.
 
+The output section also supports a `tie_breaker` config for selecting among duplicate destination matches and same-population matching (where source == destination). See [How Scoring Works](how-scoring-works.md#tie-breaker-outputtie_breaker) for details.
+
 ## Name Normalization Note
 
 > [!IMPORTANT]
