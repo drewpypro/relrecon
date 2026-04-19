@@ -81,11 +81,16 @@ For each address pair, per normalization tier:
 
 This runs for each tier (raw, clean, normalized) and each comparison pair.
 Comparisons are generated dynamically from the configured address columns:
-- **merged<>merged** (all fields concatenated)
-- **addrN<>addrM** for every source field N × destination field M
+- **addrN<>addrM** for every source field N × destination field M (evaluated first)
+- **merged<>merged** (all fields concatenated -- evaluated last)
 
-With 2 fields per side: 5 comparisons (merged + 2×2). With 3 fields: 10 (merged + 3×3). With 4: 17.
-The best weighted score across all tiers and comparisons wins.
+With 2 fields per side: 5 comparisons (2×2 + merged). With 3 fields: 10 (3×3 + merged). With 4: 17.
+The best weighted score across all tiers and comparisons wins. On equal scores,
+the first comparison evaluated wins -- so specific field matches (addr1<>addr1)
+are preferred over the noisier merged concatenation.
+
+Scores use full float precision internally for all comparisons and dedup.
+Rounding to 2 decimal places happens only in the report output layer.
 
 **Why normalize before parse:** The parser sees cleaner input.
 Alias expansion (blvd→boulevard) helps the built-in tokenizer match street suffixes.

@@ -305,13 +305,16 @@ def score_address_pair(addr_src: dict, addr_dst: dict,
         Dict with: best_score, best_comparison, street_match, tier_used,
         street_src, street_dst
     """
-    # Build comparison pairs dynamically from N fields
-    comparisons = [("merged<>merged", addr_src["addr_merged"], addr_dst["addr_merged"])]
+    # Build comparison pairs dynamically from N fields.
+    # Specific field comparisons first (higher signal), merged last
+    # (noisiest). On equal scores, first comparison wins.
+    comparisons = []
     src_fields = addr_src.get("fields", [])
     dst_fields = addr_dst.get("fields", [])
     for si, sv in enumerate(src_fields, start=1):
         for di, dv in enumerate(dst_fields, start=1):
             comparisons.append((f"addr{si}<>addr{di}", sv, dv))
+    comparisons.append(("merged<>merged", addr_src["addr_merged"], addr_dst["addr_merged"]))
 
     best = {
         "best_score": 0.0,
@@ -357,10 +360,10 @@ def score_address_pair(addr_src: dict, addr_dst: dict,
             weighted = full_score
 
         if weighted > best["best_score"]:
-            best["best_score"] = round(weighted, 1)
+            best["best_score"] = weighted
             best["best_comparison"] = comp_name
             best["street_match"] = street_match
-            best["street_score"] = round(street_score, 1)
+            best["street_score"] = street_score
             best["street_src"] = src_parsed["street_name"]
             best["street_dst"] = dst_parsed["street_name"]
 

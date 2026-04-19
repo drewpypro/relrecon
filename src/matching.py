@@ -228,7 +228,7 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
 
         matched = pl.concat([matched_src, matched_dst], how="horizontal")
         matched = matched.with_columns(
-            pl.Series("name_score", [round(s, 1) for s in scores]),
+            pl.Series("name_score", scores),
             pl.lit(tier).alias("match_tier"),
             pl.lit(tier_priority.get(tier, 99)).alias("_tier_priority"),
         )
@@ -429,7 +429,7 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             street_weight=ac.get("weights", {}).get("street_name", 0.6),
         )
 
-        # Street match gate: reject when street doesn't match
+        # Street match gate: reject when street doesn't match (Issue #110)
         if ac.get("require_street_match") and "addr_street_match" in matched.columns:
             street_fail = matched.filter(~pl.col("addr_street_match"))
             if collect_rejections and dedup_field and dedup_field in matched.columns:

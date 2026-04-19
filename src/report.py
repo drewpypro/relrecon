@@ -117,6 +117,13 @@ def _write_data(ws, df: pl.DataFrame, columns: list, start_row: int = 2):
         for col_idx, (col_name, _) in enumerate(columns, 1):
             if col_name in available_cols:
                 value = row[col_name]
+                # Round score columns for clean display
+                if col_name in ("addr_score", "name_score", "addr_street_score",
+                                "best_rejected_score") and value is not None:
+                    try:
+                        value = round(float(value), 2)
+                    except (ValueError, TypeError):
+                        pass
                 cell = ws.cell(row=row_idx, column=col_idx, value=value)
                 cell.border = THIN_BORDER
 
