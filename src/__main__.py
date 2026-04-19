@@ -133,6 +133,11 @@ def main() -> int:
         default=15,
         help="Max items per section (tokens, aliases, stopwords). 0 = show all. Default: 15",
     )
+    parser.add_argument(
+        "--profile-imports",
+        action="store_true",
+        help="Print import timing for each module at startup (debugging startup delay)",
+    )
 
     args = parser.parse_args()
 
@@ -152,19 +157,44 @@ def main() -> int:
         print(f"Error: data directory not found: {data_dir}", file=sys.stderr)
         return 1
 
+    _profile = getattr(args, "profile_imports", False)
+    if _profile:
+        import time as _ptime
+
     # Disable libpostal if requested
     if args.no_libpostal:
         import address
         address.LIBPOSTAL_AVAILABLE = False
         print("libpostal disabled -- using built-in address tokenizer")
+    elif _profile:
+        _t = _ptime.time()
+        try:
+            from postal.parser import parse_address as _lp
+            print(f"[profile] libpostal import: {_ptime.time()-_t:.3f}s (available)")
+        except (ImportError, SystemError, OSError):
+            print(f"[profile] libpostal import: {_ptime.time()-_t:.3f}s (not available)")
+
+    if _profile:
+        _t = _ptime.time()
 
     from recipe import (
         load_recipe, validate_recipe, load_source, filter_population,
         build_filter_expr, validate_fields, format_validation_summary,
         RecipeValidationError,
     )
+    if _profile:
+        print(f"[profile] recipe imports: {_ptime.time()-_t:.3f}s")
+        _t = _ptime.time()
+
     from matching import run_pipeline
+    if _profile:
+        print(f"[profile] matching imports: {_ptime.time()-_t:.3f}s")
+        _t = _ptime.time()
+
     from report import generate_report
+    if _profile:
+        print(f"[profile] report imports: {_ptime.time()-_t:.3f}s")
+        _t = _ptime.time()
 
     # Load and validate recipe
     print(f"Loading recipe: {recipe_path}")
@@ -281,6 +311,7 @@ def main() -> int:
         output_path,
         stats=stats,
         recipe=recipe,
+        recipe_file=str(recipe_path.name),
     )
     print(f"Report saved: {report_path} ({time.time() - t_report:.2f}s)")
 
@@ -292,6 +323,7 @@ def main() -> int:
         summary_md = generate_summary(
             recipe, stats, result["matched"], timing=timing,
             mermaid=mermaid_mode,
+            recipe_file=str(recipe_path.name),
         )
         summary_path = report_path.replace(".xlsx", "_summary.md")
         Path(summary_path).parent.mkdir(parents=True, exist_ok=True)

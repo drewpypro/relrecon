@@ -414,6 +414,11 @@
         }
       }
     },
+    "step_defaults": {
+      "type": "object",
+      "description": "Default values merged into every step before validation. Step-level values win on conflict. Removed after expansion.",
+      "additionalProperties": true
+    },
     "normalization": {
       "type": "object",
       "additionalProperties": false,

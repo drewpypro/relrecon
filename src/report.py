@@ -234,7 +234,8 @@ def _build_columns_from_recipe(recipe_columns: list, df: pl.DataFrame) -> list:
 
 def generate_report(matched_df: pl.DataFrame, unmatched_df: pl.DataFrame,
                     output_path: str, stats: Optional[dict] = None,
-                    recipe: Optional[dict] = None) -> str:
+                    recipe: Optional[dict] = None,
+                    recipe_file: str | None = None) -> str:
     """Generate the Excel report with Summary, Matched, and Analysis tabs.
 
     Args:
@@ -245,6 +246,7 @@ def generate_report(matched_df: pl.DataFrame, unmatched_df: pl.DataFrame,
         recipe: Optional recipe dict. When present and output.columns
                 is defined, uses recipe-driven column mapping instead
                 of hardcoded defaults. Also enables the Summary tab.
+        recipe_file: Optional recipe filename for summary tab header
 
     Returns:
         Path to the generated report
@@ -311,7 +313,8 @@ def generate_report(matched_df: pl.DataFrame, unmatched_df: pl.DataFrame,
         try:
             from summary import write_summary_tab
             ws_summary = wb.create_sheet("Summary", 0)  # Insert at position 0
-            write_summary_tab(ws_summary, recipe, stats, matched_df)
+            write_summary_tab(ws_summary, recipe, stats, matched_df,
+                              recipe_file=recipe_file)
         except Exception as exc:
             import sys
             print(f"[WARN] Summary tab generation failed: {exc}", file=sys.stderr)

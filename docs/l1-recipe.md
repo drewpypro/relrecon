@@ -132,6 +132,100 @@ Street match: 100% | Token overlap: 67% | Weighted: ~85%
     - Pop3: `cntrct_cmpl_dt` must be within 2 years
 - Pop1's `cntrct_cmpl_dt` is invalid and is NOT checked
 
+## Step Defaults
+
+Recipes with repeated config across steps can use `step_defaults` at the recipe root to reduce duplication. Values are deep-merged into every step before validation -- step-level values always win on conflict.
+
+**Example 1: All steps share the same inherit (single destination pop)**
+
+```yaml
+step_defaults:
+  address_support:
+    source: [hq_addr1, hq_addr2]
+    destination: [hq_addr1, hq_addr2]
+    parser: auto
+    tiers: [clean]
+    weights:
+      street_name: 0.75
+  inherit:
+    - source: l1_fmly_nm
+      as: derived_l1_name
+    - source: tpty_l1_id
+      as: derived_l1_id
+
+steps:
+  - name: Exact Match Pop1 L3 to Pop3 L3
+    source: pop1
+    destination: pop3
+    match_fields:
+      - source: l3_fmly_nm
+        destination: l3_fmly_nm
+        method: exact
+        tiers: [raw, clean, normalized]
+    address_support:
+      threshold: 75  # override just the threshold, inherit the rest
+    # inherit comes from step_defaults (all steps use same pop3 columns)
+```
+
+**Example 2: Steps have different destination pops with different columns**
+
+```yaml
+step_defaults:
+  address_support:
+    parser: auto
+    tiers: [clean]
+    weights:
+      street_name: 0.6
+  # NO inherit here -- steps override it per destination
+
+steps:
+  - name: Match Pop1 to core_parent
+    source: pop1
+    destination: core_parent
+    match_fields:
+      - source: l3_fmly_nm
+        destination: Vendor Name
+        method: exact
+        tiers: [raw, clean]
+    address_support:
+      source: [hq_addr1, hq_addr2]
+      destination: [Address1, Address2]  # core_parent column names
+      threshold: 75
+    inherit:  # core_parent columns
+      - source: Supplier Name
+        as: derived_l1_name
+      - source: Supplier ID
+        as: derived_l1_id
+
+  - name: Match Pop1 to Pop3
+    source: pop1
+    destination: pop3
+    match_fields:
+      - source: l3_fmly_nm
+        destination: l3_fmly_nm
+        method: exact
+        tiers: [raw, clean]
+    address_support:
+      source: [hq_addr1, hq_addr2]
+      destination: [hq_addr1, hq_addr2]  # pop3 column names
+      threshold: 75
+    inherit:  # pop3 columns (different names than core_parent)
+      - source: l1_fmly_nm
+        as: derived_l1_name
+      - source: tpty_l1_id
+        as: derived_l1_id
+```
+
+**Merge rules:**
+- **Dicts** merge recursively. A step can override `weights.street_name` without losing other default weights.
+- **Lists** (like `inherit`) replace entirely. If a step defines its own `inherit`, the default `inherit` is ignored.
+- **Scalars** (strings, numbers) in the step replace the default.
+
+> [!NOTE]
+> When a step defines `inherit`, it completely replaces any `inherit` from step_defaults. This is by design -- lists don't merge because the order and content matter. Use `inherit` in step_defaults only when all steps inherit the same columns. Otherwise, define it per step as shown in Example 2.
+
+See `config/recipes/recipe_before_globaldefaults.yaml` and `config/recipes/recipe_after_globaldefaults.yaml` for a full before/after comparison (265 lines vs 196 lines, step config 140 vs 45 lines).
+
 ## Output Report
 
 Excel workbook with three tabs:
