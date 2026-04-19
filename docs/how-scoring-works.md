@@ -298,3 +298,72 @@ Without `record_key`, the pipeline falls back to the match field (e.g. `l3_fmly_
 
 The join engine uses the `_dst` suffix to disambiguate destination columns when source and destination share column names (e.g. both populations having `hq_addr1`).
 Source data column names should not end in `_dst` to avoid conflicts with this internal naming.
+
+## Tie-Breaker (output.tie_breaker)
+
+When a source record matches multiple destination records with identical names (exact match) or identical fuzzy scores, the tie-breaker selects the winner by sorting on a destination column.
+
+**Important:** The tie-breaker is a secondary sort. Name score and address score always take priority. The tie-breaker only decides between matches that are otherwise equal.
+
+### Configuration
+
+```yaml
+output:
+  tie_breaker:
+    column: supplier_id        # destination column to sort by
+    strip_prefix: alpha        # optional: how to process values before sorting
+    order: asc                 # asc (lowest wins, default) or desc (highest wins)
+```
+
+### strip_prefix modes
+
+- **Omitted or empty:** Sort by raw string value.
+- **`alpha`:** Strip all leading letters and parse the remainder as an integer. Useful for IDs like `S1013` -- strips `S`, sorts by `1013` numerically. Values that can't be parsed as integers sort last.
+- **Any other string:** Treated as a literal prefix to strip from the start of the value before sorting as text. For example, `strip_prefix: "ID-"` converts `"ID-500"` to `"500"` but leaves `"OTHER-500"` unchanged.
+
+### How it works
+
+1. Before matching, the destination DataFrame is pre-sorted by the tie-breaker column
+2. The join preserves destination ordering (`maintain_order="right"`)
+3. Per-step dedup (`unique(keep="first")`) picks the first match -- which is the tie-breaker winner
+4. Cross-step dedup includes the tie-breaker as a secondary sort key (safety net)
+
+### Interaction with fuzzy matching
+
+For fuzzy matching, the tie-breaker only matters when multiple destination records produce the same fuzzy score. When scores differ, the highest score always wins regardless of tie-breaker preference. This is correct behavior -- match quality should take priority over arbitrary column preferences.
+
+## Same-Population Matching
+
+When a step's `source` and `destination` refer to the same population, the pipeline automatically enables self-exclusion: records won't match against themselves.
+
+### How it works
+
+- **Auto-detection:** `if src_pop == dst_pop` in the step config triggers same-pop mode
+- **Self-exclusion key:** Uses the population's `record_key` to identify self-matches
+- **Exact matching:** After the join, rows where `record_key == record_key_dst` are filtered out
+- **Fuzzy matching:** The score matrix diagonal (self-match cells) is zeroed before selecting best matches
+
+### Example
+
+```yaml
+populations:
+  all_vendors:
+    source: vendor_data
+    record_key: vendor_id
+
+steps:
+  - name: Find Duplicate Vendors
+    source: all_vendors
+    destination: all_vendors      # same population -- self-exclusion auto-enabled
+    match_fields:
+      - source: company_name
+        destination: company_name
+        method: fuzzy
+        threshold: 75
+```
+
+Records with unique names will appear in the Unmatched tab. Records with similar names will be paired with their closest match (excluding themselves).
+
+### Without record_key
+
+If the population has no `record_key`, the pipeline falls back to the match field for self-exclusion. For exact matching this means all matches are filtered out (same name = same key = self-match). For fuzzy matching, only records with identical names are excluded while similar-but-different names still match. A runtime warning is emitted recommending you add `record_key`.

@@ -93,7 +93,8 @@ def match_names_exact(source_df: pl.DataFrame, dest_df: pl.DataFrame,
                       tiers: list = None,
                       aliases: dict = None,
                       stopwords: list = None,
-                      dedup_field: str = None) -> pl.DataFrame:
+                      dedup_field: str = None,
+                      exclude_self_key: str = None) -> pl.DataFrame:
     """Exact name matching via Polars joins. No Python loops.
 
     Tries tiers in order (default: raw, clean). Deduplicates by tier priority
@@ -125,6 +126,14 @@ def match_names_exact(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             maintain_order="right",  # preserve dest ordering for tie-breaker pre-sort
         )
 
+        # Exclude self-matches for same-population matching
+        if exclude_self_key and matched.height > 0:
+            dst_key = exclude_self_key + "_dst" if exclude_self_key + "_dst" in matched.columns else None
+            if dst_key and exclude_self_key in matched.columns:
+                matched = matched.filter(
+                    pl.col(exclude_self_key).cast(pl.String) != pl.col(dst_key).cast(pl.String)
+                )
+
         if matched.height > 0:
             matched = matched.with_columns(
                 pl.lit(tier).alias("match_tier"),
@@ -154,7 +163,8 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
                       scorer: str = "token_sort_ratio",
                       aliases: dict = None,
                       stopwords: list = None,
-                      dedup_field: str = None) -> pl.DataFrame:
+                      dedup_field: str = None,
+                      exclude_self_key: str = None) -> pl.DataFrame:
     """Fuzzy name matching via RapidFuzz cdist (full C++ matrix, no Python loops).
 
     For each tier, builds match-key columns (same as exact), then uses
@@ -207,6 +217,14 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             dtype=np.float32, workers=-1,
         )
 
+        # Exclude self-matches for same-population matching
+        if exclude_self_key:
+            src_self = src[exclude_self_key].cast(pl.String).fill_null("").to_numpy()
+            dst_self = dst[exclude_self_key].cast(pl.String).fill_null("").to_numpy()
+            # Boolean mask: True where src key == dst key (self-match)
+            self_mask = src_self[:, None] == dst_self[None, :]
+            score_matrix[self_mask] = 0.0
+
         best_dst_idxs = score_matrix.argmax(axis=1)
         best_scores = score_matrix[np.arange(len(src_keys)), best_dst_idxs]
 
@@ -251,6 +269,55 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
         .drop([c for c in combined.columns if c.startswith("_")])
     )
     return combined
+
+
+# ---------------------------------------------------------------------------
+# Tie-breaker helpers
+# ---------------------------------------------------------------------------
+
+
+def _tb_sort_key_expr(col_name: str, tie_breaker: dict) -> pl.Expr:
+    """Build a Polars expression for tie-breaker sort key.
+
+    Args:
+        col_name: Column to build sort key from.
+        tie_breaker: Config dict with 'strip_prefix' and 'order'.
+
+    Returns:
+        Polars expression aliased as '_tb_sort_key'.
+    """
+    strip_prefix = tie_breaker.get("strip_prefix", "")
+    if strip_prefix == "alpha":
+        # Strip leading letters, parse remainder as integer
+        return (
+            pl.col(col_name).cast(pl.String)
+            .str.replace(r"^[A-Za-z]+", "")
+            .str.strip_chars()
+            .cast(pl.Int64, strict=False)
+            .fill_null(2**63 - 1)
+            .alias("_tb_sort_key")
+        )
+    else:
+        expr = pl.col(col_name).cast(pl.String)
+        if strip_prefix:
+            # Strip prefix from start of string only (anchored)
+            expr = expr.str.replace(r"^" + strip_prefix, "")
+        return expr.alias("_tb_sort_key")
+
+
+def _presort_by_tie_breaker(df: pl.DataFrame, tie_breaker: dict,
+                            col_name: str) -> pl.DataFrame:
+    """Pre-sort a DataFrame by tie-breaker column.
+
+    Used to sort destination before joining so per-step dedup
+    (unique keep='first') picks the tie-breaker winner.
+    """
+    tb_order = tie_breaker.get("order", "asc")
+    return (
+        df.with_columns(_tb_sort_key_expr(col_name, tie_breaker))
+        .sort("_tb_sort_key", descending=(tb_order == "desc"))
+        .drop("_tb_sort_key")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +453,11 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
     mf = step_config["match_fields"][0]
     method = mf.get("method", "exact")
 
+    # Detect same-population matching -- exclude self-matches
+    _self_key = None
+    if step_config.get("_same_pop") and dedup_field:
+        _self_key = dedup_field
+
     if method == "fuzzy":
         matched = match_names_fuzzy(
             source_df, dest_df,
@@ -396,6 +468,7 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             aliases=aliases,
             stopwords=stopwords,
             dedup_field=dedup_field,
+            exclude_self_key=_self_key,
         )
     else:
         matched = match_names_exact(
@@ -405,6 +478,7 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             aliases=aliases,
             stopwords=stopwords,
             dedup_field=dedup_field,
+            exclude_self_key=_self_key,
         )
 
     if matched.height == 0:
@@ -432,7 +506,7 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             street_weight=ac.get("weights", {}).get("street_name", 0.6),
         )
 
-        # Street match gate: reject when street doesn't match
+        # Street match gate: reject when street doesn't match (Issue #110)
         if ac.get("require_street_match") and "addr_street_match" in matched.columns:
             street_fail = matched.filter(~pl.col("addr_street_match"))
             if collect_rejections and dedup_field and dedup_field in matched.columns:
@@ -632,6 +706,17 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
         src_pop = step["source"]
         dst_pop = step["destination"]
 
+        # Detect same-population matching
+        if src_pop == dst_pop:
+            step = {**step, "_same_pop": True}
+            if track_field:
+                import sys
+                print(
+                    f'[INFO] Step {step_idx+1} ("{step.get("name", "?")}") matches '
+                    f'{src_pop} against itself -- self-matches on {track_field} will be excluded.',
+                    file=sys.stderr,
+                )
+
         src_df = populations.get(src_pop, {}).get("df")
         if src_df is None or src_df.height == 0:
             continue
@@ -641,6 +726,13 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             dst_df = sources.get(dst_pop)
         if dst_df is None or dst_df.height == 0:
             continue
+
+        # Pre-sort destination by tie-breaker so per-step dedup picks the right winner
+        tie_breaker = recipe.get("output", {}).get("tie_breaker")
+        if tie_breaker:
+            tb_col = tie_breaker["column"]
+            if tb_col in dst_df.columns:
+                dst_df = _presort_by_tie_breaker(dst_df, tie_breaker, tb_col)
 
         step_result = run_matching_step(src_df, dst_df, step,
                                            aliases=aliases, stopwords=stopwords,
@@ -690,6 +782,23 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             if "addr_score" in combined.columns:
                 sort_cols.append("addr_score")
                 sort_desc.append(True)
+
+            # Tie-breaker: secondary sort after score columns.
+            # NOTE: Per-step dedup already picks the tie-breaker winner via
+            # pre-sorted dest ordering. This cross-step sort is a safety net
+            # in case future changes alter per-step dedup behavior.
+            tie_breaker = recipe.get("output", {}).get("tie_breaker")
+            if tie_breaker:
+                tb_col = tie_breaker["column"]
+                tb_dst = tb_col + "_dst" if tb_col + "_dst" in combined.columns else tb_col
+                if tb_dst in combined.columns:
+                    tb_order = tie_breaker.get("order", "asc")
+                    combined = combined.with_columns(
+                        _tb_sort_key_expr(tb_dst, tie_breaker)
+                    )
+                    sort_cols.append("_tb_sort_key")
+                    sort_desc.append(tb_order == "desc")
+
             combined = combined.sort(sort_cols, descending=sort_desc)
             combined = combined.unique(subset=[track_field], keep="first")
 
