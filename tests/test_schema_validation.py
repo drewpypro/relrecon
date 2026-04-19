@@ -273,6 +273,34 @@ class TestNewSchemaFeatures:
         warnings = validate_recipe(r)
         assert not any("Duplicate" in w for w in warnings)
 
+    def test_multiple_errors_reported_together(self):
+        """All critical errors should be in one ValueError, not one at a time."""
+        r = _make()
+        # Create 3 duplicate step names (2 errors: steps 0&1 and 0&2)
+        step2 = copy.deepcopy(r["steps"][0])  # duplicate "step1"
+        step3 = copy.deepcopy(r["steps"][0])  # another duplicate "step1"
+        step3["name"] = "step1"  # same name
+        r["steps"].extend([step2, step3])
+        # Also add a bad exclude-on-source
+        r["populations"]["pop1"]["action"] = "exclude"
+        with pytest.raises(ValueError, match="3 errors") as exc_info:
+            validate_recipe(r)
+        msg = str(exc_info.value)
+        assert msg.count("Duplicate step name") == 2
+        assert "action: exclude" in msg
+
+    def test_single_error_no_count_prefix(self):
+        """A single error should not say '1 errors'."""
+        r = _make()
+        r["steps"].append(copy.deepcopy(r["steps"][0]))  # one duplicate
+        with pytest.raises(ValueError, match="Duplicate step name"):
+            validate_recipe(r)
+        # Should NOT contain "errors)" phrasing for single error
+        try:
+            validate_recipe(r)
+        except ValueError as e:
+            assert "errors)" not in str(e)
+
     def test_exclude_on_step_dest_warns(self):
         r = _make()
         r["populations"]["dest_pop"] = {"source": "src", "filter": []}
