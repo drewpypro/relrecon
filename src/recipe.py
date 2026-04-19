@@ -101,39 +101,42 @@ def validate_recipe(recipe: dict) -> list[str]:
                 detail = "\n  ".join(schema_errors)
                 raise ValueError(f"Recipe schema validation failed:\n  {detail}")
 
+    # Collect all critical errors, raise once at the end
+    critical: list[str] = []
+
     # Fallback for environments without jsonschema
     required = ["name", "sources", "populations", "steps", "output"]
     missing = [k for k in required if k not in recipe]
     if missing:
-        raise ValueError(f"Recipe missing required fields: {missing}")
+        critical.append(f"Recipe missing required fields: {missing}")
 
-    for name, src in recipe["sources"].items():
+    for name, src in recipe.get("sources", {}).items():
         if "file" not in src:
-            raise ValueError(f"Source '{name}' missing 'file' field")
+            critical.append(f"Source '{name}' missing 'file' field")
 
     step_names_seen: dict[str, int] = {}
-    for i, step in enumerate(recipe["steps"]):
+    for i, step in enumerate(recipe.get("steps", [])):
         for k in ["name", "source", "destination", "match_fields"]:
             if k not in step:
-                raise ValueError(f"Step {i} ('{step.get('name', '?')}') missing '{k}'")
+                critical.append(f"Step {i} ('{step.get('name', '?')}') missing '{k}'")
         sname = step.get("name")
         if sname is not None:
             if sname in step_names_seen:
-                raise ValueError(
+                critical.append(
                     f'Duplicate step name "{sname}" (steps {step_names_seen[sname]} and {i}). '
                     'Each step must have a unique name.'
                 )
             step_names_seen[sname] = i
 
-    if "format" not in recipe["output"]:
-        raise ValueError("Output missing 'format' field")
+    if "output" in recipe and "format" not in recipe["output"]:
+        critical.append("Output missing 'format' field")
 
-    source_pops = {step["source"] for step in recipe.get("steps", [])}
-    dest_pops = {step["destination"] for step in recipe.get("steps", [])}
+    source_pops = {step["source"] for step in recipe.get("steps", []) if "source" in step}
+    dest_pops = {step["destination"] for step in recipe.get("steps", []) if "destination" in step}
     for pop_name in source_pops:
         pop_cfg = recipe.get("populations", {}).get(pop_name, {})
         if pop_cfg.get("action") == "exclude":
-            raise ValueError(
+            critical.append(
                 f'Population "{pop_name}" has action: exclude but is used as a '
                 f'step source. Remove action: exclude -- it is only for garbage '
                 f'populations that should be subtracted from remainders.'
@@ -153,6 +156,12 @@ def validate_recipe(recipe: dict) -> list[str]:
                 f'Population "{pop_name}" has action: exclude but is used as a '
                 f'step destination. This may produce unexpected results.'
             )
+
+    if critical:
+        if len(critical) == 1:
+            raise ValueError(critical[0])
+        detail = "\n  - ".join(critical)
+        raise ValueError(f"Recipe validation failed ({len(critical)} errors):\n  - {detail}")
 
     return warnings
 
