@@ -120,7 +120,10 @@ def match_names_exact(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             src = _clean_column(source_df, src_field, "_match_key")
             dst = _clean_column(dest_df, dst_field, "_match_key")
 
-        matched = src.join(dst, on="_match_key", how="inner", suffix="_dst")
+        matched = src.join(
+            dst, on="_match_key", how="inner", suffix="_dst",
+            maintain_order="right",  # preserve dest ordering for tie-breaker pre-sort
+        )
 
         if matched.height > 0:
             matched = matched.with_columns(
@@ -192,8 +195,8 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             src = _clean_column(source_df, src_field, "_match_key")
             dst = _clean_column(dest_df, dst_field, "_match_key")
 
-        src_keys = [str(k) if k is not None else "" for k in src["_match_key"].to_list()]
-        dst_keys = [str(k) if k is not None else "" for k in dst["_match_key"].to_list()]
+        src_keys = src["_match_key"].cast(pl.String).fill_null("").to_list()
+        dst_keys = dst["_match_key"].cast(pl.String).fill_null("").to_list()
         if not dst_keys or not src_keys:
             continue
 
@@ -429,14 +432,16 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             street_weight=ac.get("weights", {}).get("street_name", 0.6),
         )
 
-        # Street match gate: reject when street doesn't match
+        # Street match gate: reject when street doesn't match (Issue #110)
         if ac.get("require_street_match") and "addr_street_match" in matched.columns:
             street_fail = matched.filter(~pl.col("addr_street_match"))
             if collect_rejections and dedup_field and dedup_field in matched.columns:
                 if street_fail.height > 0:
-                    keys = street_fail[dedup_field].to_list()
-                    scores = street_fail["addr_score"].to_list()
-                    rejections["street_mismatch"] = dict(zip(keys, scores))
+                    rej = street_fail.select(dedup_field, "addr_score")
+                    rejections["street_mismatch"] = dict(
+                        zip(rej[dedup_field].cast(pl.String).to_list(),
+                            rej["addr_score"].to_list())
+                    )
             matched = matched.filter(pl.col("addr_street_match"))
 
         if "threshold" in ac and "addr_score" in matched.columns:
@@ -444,9 +449,11 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             if collect_rejections and dedup_field and dedup_field in matched.columns:
                 below = matched.filter(pl.col("addr_score") < cutoff)
                 if below.height > 0:
-                    keys = below[dedup_field].to_list()
-                    scores = below["addr_score"].to_list()
-                    rejections["addr_below_threshold"] = dict(zip(keys, scores))
+                    rej = below.select(dedup_field, "addr_score")
+                    rejections["addr_below_threshold"] = dict(
+                        zip(rej[dedup_field].cast(pl.String).to_list(),
+                            rej["addr_score"].to_list())
+                    )
             matched = matched.filter(pl.col("addr_score") >= cutoff)
 
     matched = matched.with_columns(pl.lit(step_config["name"]).alias("match_step"))
@@ -665,7 +672,7 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
             all_matched.append(matched)
 
             if track_field in matched.columns:
-                matched_source_keys.update(matched[track_field].to_list())
+                matched_source_keys.update(matched[track_field].cast(pl.String).to_list())
 
     timings["match"] = _time.time() - t
 
