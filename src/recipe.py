@@ -111,10 +111,19 @@ def validate_recipe(recipe: dict) -> list[str]:
         if "file" not in src:
             raise ValueError(f"Source '{name}' missing 'file' field")
 
+    step_names_seen: dict[str, int] = {}
     for i, step in enumerate(recipe["steps"]):
         for k in ["name", "source", "destination", "match_fields"]:
             if k not in step:
                 raise ValueError(f"Step {i} ('{step.get('name', '?')}') missing '{k}'")
+        sname = step.get("name")
+        if sname is not None:
+            if sname in step_names_seen:
+                raise ValueError(
+                    f'Duplicate step name "{sname}" (steps {step_names_seen[sname]} and {i}). '
+                    'Each step must have a unique name.'
+                )
+            step_names_seen[sname] = i
 
     if "format" not in recipe["output"]:
         raise ValueError("Output missing 'format' field")

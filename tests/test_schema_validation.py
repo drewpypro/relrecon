@@ -259,6 +259,20 @@ class TestNewSchemaFeatures:
         with pytest.raises(ValueError, match="action: exclude"):
             validate_recipe(r)
 
+    def test_duplicate_step_names_raises(self):
+        r = _make()
+        r["steps"].append(copy.deepcopy(r["steps"][0]))  # same name "step1"
+        with pytest.raises(ValueError, match="Duplicate step name"):
+            validate_recipe(r)
+
+    def test_unique_step_names_ok(self):
+        r = _make()
+        step2 = copy.deepcopy(r["steps"][0])
+        step2["name"] = "step2"
+        r["steps"].append(step2)
+        warnings = validate_recipe(r)
+        assert not any("Duplicate" in w for w in warnings)
+
     def test_exclude_on_step_dest_warns(self):
         r = _make()
         r["populations"]["dest_pop"] = {"source": "src", "filter": []}
