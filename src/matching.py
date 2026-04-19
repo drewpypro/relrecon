@@ -228,7 +228,7 @@ def match_names_fuzzy(source_df: pl.DataFrame, dest_df: pl.DataFrame,
 
         matched = pl.concat([matched_src, matched_dst], how="horizontal")
         matched = matched.with_columns(
-            pl.Series("name_score", [round(s, 1) for s in scores]),
+            pl.Series("name_score", scores),
             pl.lit(tier).alias("match_tier"),
             pl.lit(tier_priority.get(tier, 99)).alias("_tier_priority"),
         )

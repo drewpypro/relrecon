@@ -103,7 +103,7 @@ Address scoring always uses RapidFuzz regardless of whether the name match was e
 
 2. For each tier (raw → clean → normalized): normalize, then score full string, then parse for street name
 
-3. Cross-compare all combinations (merged<>merged, addr1<>addr1, etc.) → best weighted score wins
+3. Cross-compare all combinations (addr1<>addr1, addr1<>addr2, ... then merged<>merged) → best weighted score wins (specific fields preferred on ties)
 
 4. Return: best score, comparison/tier that matched, whether street name was identified
 

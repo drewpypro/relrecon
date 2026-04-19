@@ -108,8 +108,8 @@ Address matching is **supporting evidence** in all steps, not standalone match c
 
 5. **Score (street)**: RapidFuzz ratio on extracted street names, 60/40 weighting when street match detected
 
-6. **Compare**: all combinations (merged<>merged, addr1<>addr1, addr1<>addr2, etc.).
-   Best weighted score across all tiers and comparisons wins.
+6. **Compare**: specific field pairs first (addr1<>addr1, addr1<>addr2, etc.), then merged<>merged.
+   Best weighted score across all tiers and comparisons wins. On equal scores, specific fields preferred.
 
 See [how-scoring-works.md](how-scoring-works.md) for a detailed walkthrough with worked examples.
 

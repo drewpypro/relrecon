@@ -226,7 +226,7 @@ With the 2-field recipe, only `addr1_only`, `addr2_only` and `addr_merged` are g
 
 **Per tier (recipe says `tiers: [clean]`):**
 
-Comparisons are generated dynamically from the number of address fields. With the 3-field recipe there are 10 comparisons: merged<>merged plus all 3×3 individual field combos (addr1<>addr1, addr1<>addr2, addr1<>addr3, addr2<>addr1, ... addr3<>addr3). With the 2-field recipe there are 5 (merged + 2×2). Source and destination can have different field counts -- with 3 source and 2 dest fields: 1 + 3×2 = 7 comparisons.
+Comparisons are generated dynamically from the number of address fields and evaluated in order: specific field pairs first, then merged. With the 3-field recipe there are 10 comparisons: all 3×3 individual field combos (addr1<>addr1, addr1<>addr2, ... addr3<>addr3) then merged<>merged. With the 2-field recipe there are 5 (2×2 + merged). Source and destination can have different field counts -- with 3 source and 2 dest fields: 3×2 + 1 = 7 comparisons. On equal scores, the first-evaluated comparison wins (specific preferred over merged).
 
 Taking addr1<>addr1 at clean tier:
 ```
