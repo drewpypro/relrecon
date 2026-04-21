@@ -32,6 +32,10 @@ def _run_signal_analysis(args) -> int:
               file=sys.stderr)
         return 1
 
+    # Resolve output format
+    signal_format = getattr(args, "signal_format", "md") or "md"
+    signal_output = getattr(args, "signal_output", None)
+
     try:
         df = load_source({"file": str(file_path)}, base_dir=".")
     except Exception as e:
@@ -48,16 +52,65 @@ def _run_signal_analysis(args) -> int:
     if msg:
         print(msg)
 
+    # Warn on large Excel output
+    top_n = args.top if args.top > 0 else None
+    if signal_format in ("xlsx", "both") and top_n:
+        est_cells = len(columns) * top_n * 6  # ~6 cols per row
+        if est_cells > 50000:
+            print(f"Warning: estimated {est_cells:,} cells in Excel output "
+                  f"({len(columns)} columns x {top_n} top). This may take a moment.")
+
     print(f"Analyzing {len(columns)} columns...")
     results = analyze_dataset(df, columns, unicode_mode="profile_only",
                               output_dir=str(save_dir) if save_dir else None)
 
     sections = set(s.strip() for s in args.sections.split(",")) if args.sections else None
-    top_n = args.top if args.top > 0 else None
-    report = format_report(results, file_path=str(file_path), columns=columns,
-                           sections=sections, top_n=top_n)
-    print()
-    print(report)
+
+    # Markdown report (to stdout and optionally to file)
+    if signal_format in ("md", "both"):
+        report = format_report(results, file_path=str(file_path), columns=columns,
+                               sections=sections, top_n=top_n)
+        print()
+        print(report)
+
+        if signal_output and signal_format == "md":
+            out_path = signal_output
+            if not out_path.endswith(".md"):
+                out_path += ".md"
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w") as f:
+                f.write(report)
+            print(f"Markdown report saved: {out_path}")
+
+    # Excel report
+    if signal_format in ("xlsx", "both"):
+        from signal_excel import generate_signal_excel
+
+        if signal_output:
+            xlsx_path = signal_output
+            if signal_format == "both" and not xlsx_path.endswith(".xlsx"):
+                xlsx_path += ".xlsx"
+            elif signal_format == "xlsx" and not xlsx_path.endswith(".xlsx"):
+                xlsx_path += ".xlsx"
+        else:
+            # Auto-generate from input filename
+            from datetime import datetime as _dt
+            stem = file_path.stem
+            ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+            xlsx_path = f"output/signal_analysis_{stem}_{ts}.xlsx"
+
+        xlsx_result = generate_signal_excel(
+            results, xlsx_path, top_n=top_n, summary_top_n=25)
+        print(f"Excel report saved: {xlsx_result}")
+
+        # If both, also save markdown alongside
+        if signal_format == "both" and signal_output:
+            md_path = xlsx_path.replace(".xlsx", ".md")
+            report = format_report(results, file_path=str(file_path), columns=columns,
+                                   sections=sections, top_n=top_n)
+            with open(md_path, "w") as f:
+                f.write(report)
+            print(f"Markdown report saved: {md_path}")
 
     if save_dir:
         print(f"Config saved to: {save_dir}/stopwords.json, {save_dir}/aliases.json")
@@ -132,6 +185,18 @@ def main() -> int:
         type=int,
         default=15,
         help="Max items per section (tokens, aliases, stopwords). 0 = show all. Default: 15",
+    )
+    parser.add_argument(
+        "--signal-output",
+        default=None,
+        metavar="FILE",
+        help="Output path for signal analysis report (auto-generates if not set, use with --analyze)",
+    )
+    parser.add_argument(
+        "--signal-format",
+        default="md",
+        choices=["md", "xlsx", "both"],
+        help="Signal analysis output format: md (markdown), xlsx (Excel), both (default: md)",
     )
     parser.add_argument(
         "--profile-imports",
