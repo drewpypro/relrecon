@@ -7,7 +7,9 @@ for terminal display or file output.
 
 
 # All available report sections
-ALL_SECTIONS = {"quality", "tokens", "stopwords", "aliases", "unicode", "suggestions"}
+ALL_SECTIONS = {"quality", "tokens", "stopwords", "aliases", "unicode",
+                "suggestions", "singletons", "duplicates", "positions",
+                "lengths", "numeric"}
 
 
 def format_report(results: dict, file_path: str = "",
@@ -30,12 +32,13 @@ def format_report(results: dict, file_path: str = "",
     if quality and "quality" in sections:
         lines.append("## Data Quality")
         lines.append("")
-        lines.append("| Column | Rows | Null % | Unique % | Duplicates |")
-        lines.append("|---|---|---|---|---|")
+        lines.append("| Column | Rows | Null % | Unique % | Duplicates | Numeric % |")
+        lines.append("|---|---|---|---|---|---|")
         for col, q in quality.items():
             lines.append(
                 f"| {col} | {q['total_rows']} | {q['null_pct']}% "
-                f"| {q['unique_pct']}% | {q['duplicate_count']} |"
+                f"| {q['unique_pct']}% | {q['duplicate_count']} "
+                f"| {q.get('numeric_token_pct', 0)}% |"
             )
         lines.append("")
 
@@ -66,6 +69,124 @@ def format_report(results: dict, file_path: str = "",
                 lines.append("|---|---|")
                 for token, count in clean_tokens:
                     lines.append(f"| {token} | {count} |")
+                lines.append("")
+
+            # Bigrams
+            raw_bigrams = data.get("bigrams_raw", [])[:top_n]
+            clean_bigrams = data.get("bigrams_clean", [])[:top_n]
+            if raw_bigrams:
+                lines.append("**Top bigrams (raw):**")
+                lines.append("")
+                lines.append("| Bigram | Count |")
+                lines.append("|---|---|")
+                for gram, count in raw_bigrams:
+                    lines.append(f"| {gram} | {count} |")
+                lines.append("")
+            if clean_bigrams:
+                lines.append("**Top bigrams (clean):**")
+                lines.append("")
+                lines.append("| Bigram | Count |")
+                lines.append("|---|---|")
+                for gram, count in clean_bigrams:
+                    lines.append(f"| {gram} | {count} |")
+                lines.append("")
+
+            # Trigrams
+            raw_trigrams = data.get("trigrams_raw", [])[:top_n]
+            clean_trigrams = data.get("trigrams_clean", [])[:top_n]
+            if raw_trigrams:
+                lines.append("**Top trigrams (raw):**")
+                lines.append("")
+                lines.append("| Trigram | Count |")
+                lines.append("|---|---|")
+                for gram, count in raw_trigrams:
+                    lines.append(f"| {gram} | {count} |")
+                lines.append("")
+            if clean_trigrams:
+                lines.append("**Top trigrams (clean):**")
+                lines.append("")
+                lines.append("| Trigram | Count |")
+                lines.append("|---|---|")
+                for gram, count in clean_trigrams:
+                    lines.append(f"| {gram} | {count} |")
+                lines.append("")
+
+        # Singletons
+        if "singletons" in sections:
+            singletons = data.get("singletons", [])
+            if singletons:
+                show = singletons[:top_n] if top_n else singletons
+                lines.append(f"**Singleton tokens:** {len(singletons)} found "
+                             "(appear exactly once -- potential typos)")
+                lines.append("")
+                lines.append("| Token | Count |")
+                lines.append("|---|---|")
+                for token, count in show:
+                    lines.append(f"| {token} | {count} |")
+                if top_n and len(singletons) > top_n:
+                    lines.append(f"| ... | {len(singletons) - top_n} more |")
+                lines.append("")
+
+        # Near-duplicates
+        if "duplicates" in sections:
+            near_dupes = data.get("near_duplicates", [])
+            if near_dupes:
+                show = near_dupes[:top_n] if top_n else near_dupes
+                lines.append(f"**Near-duplicate tokens:** {len(near_dupes)} pairs "
+                             "(edit distance 1-2)")
+                lines.append("")
+                lines.append("| Token 1 | Token 2 | Similarity | Count 1 | Count 2 |")
+                lines.append("|---|---|---|---|---|")
+                for nd in show:
+                    lines.append(
+                        f"| {nd['token1']} | {nd['token2']} | {nd['similarity']}% "
+                        f"| {nd['count1']} | {nd['count2']} |"
+                    )
+                if top_n and len(near_dupes) > top_n:
+                    lines.append(f"| ... | | {len(near_dupes) - top_n} more | | |")
+                lines.append("")
+
+        # Token positions
+        if "positions" in sections:
+            positions = data.get("token_positions", {})
+            if any(positions.get(k) for k in ("first", "last", "middle")):
+                lines.append("**Token position frequency:**")
+                lines.append("")
+                for pos_name in ("first", "last", "middle"):
+                    pos_data = positions.get(pos_name, [])[:top_n]
+                    if pos_data:
+                        lines.append(f"*{pos_name.title()} position:*")
+                        lines.append("")
+                        lines.append("| Token | Count |")
+                        lines.append("|---|---|")
+                        for token, count in pos_data:
+                            lines.append(f"| {token} | {count} |")
+                        lines.append("")
+
+        # Token lengths
+        if "lengths" in sections:
+            tl = data.get("token_lengths", {})
+            if tl and tl.get("histogram"):
+                lines.append(
+                    f"**Token length stats:** min={tl['min']}, max={tl['max']}, "
+                    f"mean={tl['mean']}, median={tl['median']}"
+                )
+                lines.append("")
+                hist = tl["histogram"][:top_n] if top_n else tl["histogram"]
+                lines.append("| Length | Count |")
+                lines.append("|---|---|")
+                for length, count in hist:
+                    lines.append(f"| {length} | {count} |")
+                lines.append("")
+
+        # Numeric ratio
+        if "numeric" in sections:
+            nr = data.get("numeric_ratio", {})
+            if nr and nr.get("total_tokens", 0) > 0:
+                lines.append(
+                    f"**Token types:** {nr['alpha']} alpha, {nr['numeric']} numeric, "
+                    f"{nr['mixed']} mixed ({nr['numeric_pct']}% numeric)"
+                )
                 lines.append("")
 
         # Suggested stopwords

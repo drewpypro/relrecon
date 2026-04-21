@@ -3,13 +3,20 @@ Signal Analysis module for the relational matching framework.
 
 Profiles source data to bootstrap normalization config:
 - Top N tokens per column at Raw and Clean tiers
+- Bigram and trigram frequency analysis
 - Auto-detect column type (name, address, date, ID)
 - Suggested stopwords from frequency distribution
 - Suggested alias groups from variant detection
+- Singleton token detection (appear exactly once -- potential typos)
+- Near-duplicate token detection (edit distance 1-2 via RapidFuzz)
+- Token position frequency (first/last/middle)
+- Token length distribution
+- Numeric token ratio
 - Unicode profile per column
 - Data quality summary
 
 Uses normalize.py for all transformations. Single source of truth.
+Polars-native operations used throughout per ADR-001.
 """
 
 import json
@@ -19,6 +26,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import polars as pl
 
 from normalize import clean, profile_column as unicode_profile_column, _load_ranges
@@ -118,35 +126,344 @@ def detect_column_type(series: pl.Series) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Internal helpers: Polars-native tokenization
+# ---------------------------------------------------------------------------
+
+def _tokenize_series(series: pl.Series, tier: str = "raw") -> pl.DataFrame:
+    """Split a series into tokens at the given tier. Returns DataFrame with 'tok' column.
+
+    Polars-native: no Python lambdas or map_elements.
+    """
+    s = series.drop_nulls().cast(pl.String)
+    if tier == "clean":
+        s = s.str.to_lowercase().str.replace_all(r'[,.;:]', '')
+    return s.str.split(" ").explode().to_frame("tok").filter(pl.col("tok") != "")
+
+
+def _tokenize_with_index(series: pl.Series, tier: str = "raw") -> pl.DataFrame:
+    """Split series into tokens preserving row index and position.
+
+    Returns DataFrame with columns: row_idx, pos, tok, total_tokens.
+    Polars-native.
+    """
+    s = series.drop_nulls().cast(pl.String)
+    if tier == "clean":
+        s = s.str.to_lowercase().str.replace_all(r'[,.;:]', '')
+
+    # Split and track row index
+    df = s.to_frame("val").with_row_index("row_idx")
+    df = df.with_columns(pl.col("val").str.split(" ").alias("tokens"))
+    df = df.with_columns(pl.col("tokens").list.len().alias("total_tokens"))
+    df = df.explode("tokens").rename({"tokens": "tok"})
+    df = df.filter(pl.col("tok") != "")
+
+    # Add position within each row
+    df = df.with_columns(
+        pl.col("tok").cum_count().over("row_idx").alias("pos")
+    )
+    return df.select("row_idx", "pos", "tok", "total_tokens")
+
+
+# ---------------------------------------------------------------------------
 # Token analysis
 # ---------------------------------------------------------------------------
 
 def top_tokens(series: pl.Series, tier: str = "raw", n: int = 50) -> list[tuple[str, int]]:
     """Extract top N tokens from a column at a given normalization tier.
 
-    Args:
-        series: Polars Series of string values
-        tier: 'raw' or 'clean'
-        n: Number of top tokens to return
-
-    Returns:
-        List of (token, count) tuples sorted by frequency descending
+    Polars-native: split, explode, group_by, sort.
     """
     if tier not in ("raw", "clean"):
         raise ValueError(f"top_tokens only supports 'raw' or 'clean' tiers, got '{tier}'")
 
-    s = series.drop_nulls().cast(pl.String)
-    if tier == "clean":
-        s = s.str.to_lowercase().str.replace_all(r'[,.;:]', '')
-    # Split, explode, filter empty, count
-    df = s.str.split(" ").explode().to_frame("tok")
-    df = df.filter(pl.col("tok") != "")
+    df = _tokenize_series(series, tier)
     counts = df.group_by("tok").len().sort("len", descending=True).head(n)
     return [(row[0], row[1]) for row in counts.iter_rows()]
 
 
+def top_ngrams(series: pl.Series, tier: str = "raw", n_gram: int = 2,
+              n: int = 50) -> list[tuple[str, int]]:
+    """Extract top N bigrams or trigrams from a column.
+
+    Uses Polars list operations where possible, with a targeted Python
+    loop for n-gram window construction (no Polars-native sliding window).
+    """
+    if tier not in ("raw", "clean"):
+        raise ValueError(f"top_ngrams only supports 'raw' or 'clean' tiers, got '{tier}'")
+
+    s = series.drop_nulls().cast(pl.String)
+    if tier == "clean":
+        s = s.str.to_lowercase().str.replace_all(r'[,.;:]', '')
+
+    # Build ngrams per row using list operations
+    # Get token lists, filter empties, then build ngrams
+    token_lists = (
+        s.str.split(" ")
+        .list.eval(pl.element().filter(pl.element() != ""))
+        .to_list()
+    )
+
+    # N-gram construction (targeted Python -- no Polars sliding window primitive)
+    ngram_counts: dict[str, int] = {}
+    for tokens in token_lists:
+        for i in range(len(tokens) - n_gram + 1):
+            gram = " ".join(tokens[i:i + n_gram])
+            ngram_counts[gram] = ngram_counts.get(gram, 0) + 1
+
+    sorted_grams = sorted(ngram_counts.items(), key=lambda x: -x[1])
+    return sorted_grams[:n]
+
+
 # ---------------------------------------------------------------------------
-# Stopword suggestion
+# Singleton tokens (appear exactly once -- potential typos/errors)
+# ---------------------------------------------------------------------------
+
+def singleton_tokens(series: pl.Series, tier: str = "clean",
+                     n: int = 50) -> list[tuple[str, int]]:
+    """Find tokens that appear exactly once in a column.
+
+    Singletons are potential typos, data entry errors, or unique identifiers.
+    Returns up to n singleton tokens sorted alphabetically.
+    Polars-native.
+    """
+    df = _tokenize_series(series, tier)
+    singletons = (
+        df.group_by("tok").len()
+        .filter(pl.col("len") == 1)
+        .sort("tok")
+        .head(n)
+    )
+    return [(row[0], row[1]) for row in singletons.iter_rows()]
+
+
+# ---------------------------------------------------------------------------
+# Near-duplicate tokens (edit distance 1-2 -- probable typos)
+# ---------------------------------------------------------------------------
+
+def near_duplicate_tokens(series: pl.Series, tier: str = "clean",
+                          max_tokens: int = 200, threshold: int = 85,
+                          n: int = 30) -> list[dict]:
+    """Find token pairs with high similarity (edit distance 1-2).
+
+    Uses RapidFuzz for efficient pairwise comparison on top-K unique tokens.
+    Only compares tokens of similar length (within 2 chars) for performance.
+
+    Returns list of {"token1": str, "token2": str, "similarity": int,
+                     "count1": int, "count2": int} dicts.
+    """
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        return []  # Graceful skip if RapidFuzz not installed
+
+    df = _tokenize_series(series, tier)
+    token_counts = (
+        df.group_by("tok").len()
+        .sort("len", descending=True)
+        .head(max_tokens)
+    )
+
+    tokens = token_counts["tok"].to_list()
+    counts = {row[0]: row[1] for row in token_counts.iter_rows()}
+
+    if len(tokens) < 2:
+        return []
+
+    # Group by length for efficient comparison (only compare similar lengths)
+    by_len: dict[int, list[str]] = {}
+    for t in tokens:
+        tlen = len(t)
+        by_len.setdefault(tlen, []).append(t)
+
+    pairs = []
+    seen = set()
+    sorted_lens = sorted(by_len.keys())
+
+    for i, l in enumerate(sorted_lens):
+        group = by_len[l]
+        # Compare within same length
+        for a_idx in range(len(group)):
+            for b_idx in range(a_idx + 1, len(group)):
+                a, b = group[a_idx], group[b_idx]
+                sim = fuzz.ratio(a, b)
+                if sim >= threshold:
+                    key = (min(a, b), max(a, b))
+                    if key not in seen:
+                        seen.add(key)
+                        pairs.append({
+                            "token1": a, "token2": b,
+                            "similarity": sim,
+                            "count1": counts[a], "count2": counts[b],
+                        })
+        # Compare with adjacent length (+1)
+        if i + 1 < len(sorted_lens) and sorted_lens[i + 1] == l + 1:
+            adj_group = by_len[l + 1]
+            for a in group:
+                for b in adj_group:
+                    sim = fuzz.ratio(a, b)
+                    if sim >= threshold:
+                        key = (min(a, b), max(a, b))
+                        if key not in seen:
+                            seen.add(key)
+                            pairs.append({
+                                "token1": a, "token2": b,
+                                "similarity": sim,
+                                "count1": counts[a], "count2": counts[b],
+                            })
+        # Compare with length +2
+        if i + 1 < len(sorted_lens):
+            for j in range(i + 1, len(sorted_lens)):
+                if sorted_lens[j] > l + 2:
+                    break
+                if sorted_lens[j] == l + 2:
+                    adj_group = by_len[sorted_lens[j]]
+                    for a in group:
+                        for b in adj_group:
+                            sim = fuzz.ratio(a, b)
+                            if sim >= threshold:
+                                key = (min(a, b), max(a, b))
+                                if key not in seen:
+                                    seen.add(key)
+                                    pairs.append({
+                                        "token1": a, "token2": b,
+                                        "similarity": sim,
+                                        "count1": counts[a],
+                                        "count2": counts[b],
+                                    })
+
+    pairs.sort(key=lambda x: -x["similarity"])
+    return pairs[:n]
+
+
+# ---------------------------------------------------------------------------
+# Token position frequency
+# ---------------------------------------------------------------------------
+
+def token_position_frequency(series: pl.Series, tier: str = "clean",
+                             n: int = 30) -> dict:
+    """Analyze where tokens appear: first word, last word, or middle.
+
+    Returns {"first": [(token, count), ...], "last": [...], "middle": [...]}.
+    Polars-native.
+    """
+    df = _tokenize_with_index(series, tier)
+
+    if df.height == 0:
+        return {"first": [], "last": [], "middle": []}
+
+    # First token: pos == 1
+    first = (
+        df.filter(pl.col("pos") == 1)
+        .group_by("tok").len()
+        .sort("len", descending=True)
+        .head(n)
+    )
+
+    # Last token: pos == total_tokens
+    last = (
+        df.filter(pl.col("pos") == pl.col("total_tokens"))
+        .group_by("tok").len()
+        .sort("len", descending=True)
+        .head(n)
+    )
+
+    # Middle: everything else (multi-token rows only)
+    middle = (
+        df.filter(
+            (pl.col("pos") > 1) &
+            (pl.col("pos") < pl.col("total_tokens")) &
+            (pl.col("total_tokens") > 2)
+        )
+        .group_by("tok").len()
+        .sort("len", descending=True)
+        .head(n)
+    )
+
+    return {
+        "first": [(r[0], r[1]) for r in first.iter_rows()],
+        "last": [(r[0], r[1]) for r in last.iter_rows()],
+        "middle": [(r[0], r[1]) for r in middle.iter_rows()],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Token length distribution
+# ---------------------------------------------------------------------------
+
+def token_length_distribution(series: pl.Series, tier: str = "clean") -> dict:
+    """Compute token length statistics and histogram.
+
+    Returns {"min": int, "max": int, "mean": float, "median": float,
+             "histogram": [(length, count), ...]}.
+    Polars-native.
+    """
+    df = _tokenize_series(series, tier)
+
+    if df.height == 0:
+        return {"min": 0, "max": 0, "mean": 0.0, "median": 0.0, "histogram": []}
+
+    df = df.with_columns(pl.col("tok").str.len_chars().alias("tok_len"))
+
+    stats = df.select(
+        pl.col("tok_len").min().alias("min"),
+        pl.col("tok_len").max().alias("max"),
+        pl.col("tok_len").mean().alias("mean"),
+        pl.col("tok_len").median().alias("median"),
+    ).row(0, named=True)
+
+    histogram = (
+        df.group_by("tok_len").len()
+        .sort("tok_len")
+    )
+
+    return {
+        "min": int(stats["min"]),
+        "max": int(stats["max"]),
+        "mean": round(float(stats["mean"]), 2),
+        "median": float(stats["median"]),
+        "histogram": [(r[0], r[1]) for r in histogram.iter_rows()],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Numeric token ratio
+# ---------------------------------------------------------------------------
+
+def numeric_token_ratio(series: pl.Series, tier: str = "raw") -> dict:
+    """Compute ratio of numeric tokens vs word tokens.
+
+    Returns {"total_tokens": int, "numeric": int, "alpha": int,
+             "mixed": int, "numeric_pct": float}.
+    Polars-native.
+    """
+    df = _tokenize_series(series, tier)
+
+    if df.height == 0:
+        return {"total_tokens": 0, "numeric": 0, "alpha": 0,
+                "mixed": 0, "numeric_pct": 0.0}
+
+    # Classify tokens
+    classified = df.with_columns(
+        pl.col("tok").str.contains(r'^\d+\.?\d*$').alias("is_numeric"),
+        pl.col("tok").str.contains(r'^[A-Za-z]+$').alias("is_alpha"),
+    )
+
+    total = classified.height
+    numeric = classified.filter(pl.col("is_numeric")).height
+    alpha = classified.filter(pl.col("is_alpha")).height
+    mixed = total - numeric - alpha
+
+    return {
+        "total_tokens": total,
+        "numeric": numeric,
+        "alpha": alpha,
+        "mixed": mixed,
+        "numeric_pct": round(numeric / total * 100, 1) if total > 0 else 0.0,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Stopword suggestion (Polars-native)
 # ---------------------------------------------------------------------------
 
 def suggest_stopwords(series: pl.Series, col_type: str = "name",
@@ -154,24 +471,28 @@ def suggest_stopwords(series: pl.Series, col_type: str = "name",
     """Suggest stopwords based on token frequency distribution.
 
     Tokens appearing in > threshold fraction of non-null rows are candidates.
-    Filters by column type expectations.
-
-    Returns:
-        List of {"token": str, "frequency": float, "count": int} dicts
+    Polars-native: uses list.unique() instead of map_elements.
     """
     total_rows = series.drop_nulls().len()
     if total_rows == 0:
         return []
 
-    # Clean, split, get unique tokens per row, then count across rows
+    # Clean, split, deduplicate within each row (Polars-native)
     cleaned = series.drop_nulls().cast(pl.String).str.to_lowercase().str.replace_all(r'[,.;:]', '')
-    # Each row -> list of unique tokens
-    per_row = cleaned.str.split(" ").map_elements(
-        lambda tokens: list(set(t for t in tokens if t)), return_dtype=pl.List(pl.String)
+    per_row_unique = (
+        cleaned.str.split(" ")
+        .list.unique()
+        .list.eval(pl.element().filter(pl.element() != ""))
     )
-    row_counts = per_row.explode().to_frame("tok").filter(
-        pl.col("tok") != ""
-    ).group_by("tok").len().sort("len", descending=True)
+
+    # Explode, count across rows
+    row_counts = (
+        per_row_unique.explode()
+        .to_frame("tok")
+        .filter(pl.col("tok").is_not_null())
+        .group_by("tok").len()
+        .sort("len", descending=True)
+    )
 
     # Known stopword candidates by type
     known_stopwords = {
@@ -200,7 +521,7 @@ def suggest_stopwords(series: pl.Series, col_type: str = "name",
 
 
 # ---------------------------------------------------------------------------
-# Alias suggestion
+# Alias suggestion (Polars-native where possible)
 # ---------------------------------------------------------------------------
 
 def _alias_group_key(token: str) -> str:
@@ -211,22 +532,20 @@ def _alias_group_key(token: str) -> str:
 def suggest_aliases(series: pl.Series, n: int = 30) -> list:
     """Find punctuation variants (O'Brien/OBrien, AT&T/ATT, Co-Op/Coop).
 
-    Does NOT detect semantic aliases (Blvd/Boulevard) -- those need a dictionary.
+    Uses Polars for tokenization and counting, Python for group key logic
+    (regex per token has no Polars equivalent).
     """
-    # Tokenize and count via Polars
-    df = series.drop_nulls().cast(pl.String).str.split(" ").explode().to_frame("tok")
-    df = df.filter(pl.col("tok") != "")
+    # Polars-native tokenization and counting
+    df = _tokenize_series(series, "raw")
     token_counts = df.group_by("tok").len()
 
-    # Group by alias key in Python (complex regex per token)
-    groups = {}
+    # Group by alias key (Python -- no Polars regex substitution per token)
+    groups: dict[str, list[tuple[str, int]]] = {}
     for token, count in token_counts.iter_rows():
         key = _alias_group_key(token)
         if not key:
             continue
-        if key not in groups:
-            groups[key] = []
-        groups[key].append((token, count))
+        groups.setdefault(key, []).append((token, count))
 
     # Only suggest groups with multiple variants
     aliases = []
@@ -235,11 +554,11 @@ def suggest_aliases(series: pl.Series, n: int = 30) -> list:
             total = sum(c for _, c in variants)
             aliases.append({
                 "canonical": canonical,
-                "variants": [{"raw": v, "count": c} for v, c in sorted(variants, key=lambda x: -x[1])],
+                "variants": [{"raw": v, "count": c}
+                             for v, c in sorted(variants, key=lambda x: -x[1])],
                 "total_count": total,
             })
 
-    # Sort by total count descending
     aliases.sort(key=lambda x: -x["total_count"])
     return aliases[:n]
 
@@ -251,8 +570,7 @@ def suggest_aliases(series: pl.Series, n: int = 30) -> list:
 def data_quality_summary(df: pl.DataFrame, columns: Optional[list] = None) -> dict:
     """Generate data quality summary for selected columns.
 
-    Returns:
-        Dict with per-column stats: null_pct, unique_pct, duplicates, etc.
+    Polars-native aggregation.
     """
     if columns is None:
         columns = df.columns
@@ -269,16 +587,24 @@ def data_quality_summary(df: pl.DataFrame, columns: Optional[list] = None) -> di
         non_null = total_rows - null_count
         n_unique = series.n_unique()
 
-        # Value length stats (for string columns)
+        # Value length stats (for string columns) -- Polars-native
         lengths = None
         if series.dtype == pl.String:
             len_series = series.drop_nulls().cast(pl.String).str.len_chars()
             if len_series.len() > 0:
+                stats = len_series.to_frame("l").select(
+                    pl.col("l").min().alias("min"),
+                    pl.col("l").max().alias("max"),
+                    pl.col("l").mean().alias("mean"),
+                ).row(0, named=True)
                 lengths = {
-                    "min": int(len_series.min()),
-                    "max": int(len_series.max()),
-                    "mean": round(float(len_series.mean()), 1),
+                    "min": int(stats["min"]),
+                    "max": int(stats["max"]),
+                    "mean": round(float(stats["mean"]), 1),
                 }
+
+        # Numeric token ratio
+        num_ratio = numeric_token_ratio(series)
 
         summary[col] = {
             "total_rows": total_rows,
@@ -289,6 +615,7 @@ def data_quality_summary(df: pl.DataFrame, columns: Optional[list] = None) -> di
             "unique_pct": round(n_unique / total_rows * 100, 1) if total_rows > 0 else 0.0,
             "duplicate_count": total_rows - n_unique,
             "lengths": lengths,
+            "numeric_token_pct": num_ratio["numeric_pct"],
         }
 
     return summary
@@ -304,15 +631,9 @@ def analyze_column(series: pl.Series, col_name: str,
                    top_n: int = 30) -> dict:
     """Run full signal analysis on a single column.
 
-    Args:
-        series: Polars Series
-        col_name: Column name (for labeling)
-        col_type: Override column type, or None to auto-detect
-        unicode_mode: 'profile_only' or 'skip'
-        top_n: Number of top tokens/suggestions to return
-
-    Returns:
-        Dict with all analysis results for the column
+    Includes token analysis (topk, bigrams, trigrams), singletons,
+    near-duplicates, position frequency, length distribution,
+    numeric ratio, stopwords, aliases and unicode profiling.
     """
     if col_type is None:
         col_type = detect_column_type(series)
@@ -322,6 +643,16 @@ def analyze_column(series: pl.Series, col_name: str,
         "detected_type": col_type,
         "top_tokens_raw": top_tokens(series, tier="raw", n=top_n),
         "top_tokens_clean": top_tokens(series, tier="clean", n=top_n),
+        "bigrams_raw": top_ngrams(series, tier="raw", n_gram=2, n=top_n),
+        "bigrams_clean": top_ngrams(series, tier="clean", n_gram=2, n=top_n),
+        "trigrams_raw": top_ngrams(series, tier="raw", n_gram=3, n=top_n),
+        "trigrams_clean": top_ngrams(series, tier="clean", n_gram=3, n=top_n),
+        "singletons": singleton_tokens(series, tier="clean", n=top_n),
+        "near_duplicates": near_duplicate_tokens(series, tier="clean",
+                                                  max_tokens=200, n=top_n),
+        "token_positions": token_position_frequency(series, tier="clean", n=top_n),
+        "token_lengths": token_length_distribution(series, tier="clean"),
+        "numeric_ratio": numeric_token_ratio(series),
         "suggested_stopwords": suggest_stopwords(series, col_type=col_type),
         "suggested_aliases": suggest_aliases(series),
     }
@@ -338,15 +669,7 @@ def analyze_dataset(df: pl.DataFrame, columns: list,
                     output_dir: Optional[str] = None) -> dict:
     """Run signal analysis on multiple columns of a dataset.
 
-    Args:
-        df: Polars DataFrame
-        columns: List of column names to analyze
-        col_types: Optional dict of {col_name: type_override}
-        unicode_mode: 'profile_only' or 'skip'
-        output_dir: If set, write stopwords.json and aliases.json
-
-    Returns:
-        Dict with per-column analysis + data quality summary
+    Returns dict with per-column analysis + data quality summary.
     """
     col_types = col_types or {}
 
