@@ -6,3 +6,7 @@ tests/results/*
 reviews/
 output/
 data/*gleif*
+
+
+# Loader cache
+.cache/

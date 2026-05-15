@@ -23,14 +23,10 @@
       "type": "object",
       "additionalProperties": {
         "type": "object",
-        "required": [
-          "file"
-        ],
-        "additionalProperties": false,
         "properties": {
           "file": {
             "type": "string",
-            "description": "Path to data file (CSV, Parquet, or any Polars-supported format)"
+            "description": "Path to data file (CSV, TSV, or Parquet)"
           },
           "type": {
             "type": "string",
@@ -39,8 +35,48 @@
               "multi_population"
             ],
             "description": "Source type label (informational)"
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Subset of columns to load"
+          },
+          "loader": {
+            "type": "string",
+            "enum": [
+              "file",
+              "sql"
+            ],
+            "description": "Loader type (default: file)"
+          },
+          "driver": {
+            "type": "string",
+            "enum": [
+              "sqlite",
+              "postgresql",
+              "postgres",
+              "trino"
+            ],
+            "description": "Database driver (required for sql loader)"
+          },
+          "connection": {
+            "type": "object",
+            "description": "Connection config (supports ${VAR} env interpolation)",
+            "additionalProperties": true
+          },
+          "query": {
+            "type": "string",
+            "description": "SQL query to execute"
+          },
+          "cache_ttl": {
+            "type": "string",
+            "description": "Cache TTL for SQL results. Examples: '24h', '12h', '30m', '7d', 'off'. Default: '24h'",
+            "default": "24h"
           }
-        }
+        },
+        "additionalProperties": false
       }
     },
     "populations": {

@@ -1,0 +1,107 @@
+# Demo: Reconcile migrated parts against trusted catalog (sample data)
+#
+# Uses the sample.demo tables loaded by setup.sh (15 rows each).
+# Smaller and simpler than the tpch demo -- good for a first test.
+#
+# Setup:
+#   cd examples/trino && ./setup.sh
+# Run:
+#   export TRINO_HOST=localhost TRINO_USER=test TRINO_PASSWORD=test123
+#   python3 -m src --recipe examples/trino/sample_recipe.yaml
+
+name: Sample Parts Reconciliation
+description: >
+  Match 15 migrated parts (mangled names) against 15 trusted reference
+  records. Uses sample data loaded into Trino by setup.sh.
+
+sources:
+  migrated:
+    loader: sql
+    driver: trino
+    connection:
+      host: ${TRINO_HOST}
+      port: 8085
+      user: ${TRINO_USER}
+      password: ${TRINO_PASSWORD}
+      http_scheme: https
+      verify: false
+      catalog: sample
+      schema: demo
+    query: |
+      SELECT vendor_id, vendor_name, part_type, brand
+      FROM migrated_parts
+    type: multi_population
+
+  trusted:
+    loader: sql
+    driver: trino
+    connection:
+      host: ${TRINO_HOST}
+      port: 8085
+      user: ${TRINO_USER}
+      password: ${TRINO_PASSWORD}
+      http_scheme: https
+      verify: false
+      catalog: sample
+      schema: demo
+    query: |
+      SELECT vendor_id, vendor_name, part_type, brand
+      FROM trusted_parts
+    type: trusted_reference
+
+populations:
+  migrated_records:
+    source: migrated
+    record_key: vendor_id
+    filter: []
+
+  trusted_records:
+    source: trusted
+    record_key: vendor_id
+    filter: []
+
+steps:
+  - name: Exact name match
+    source: migrated_records
+    destination: trusted_records
+    match_fields:
+      - source: vendor_name
+        destination: vendor_name
+        method: exact
+        tiers: [raw, clean]
+
+  - name: Fuzzy name match
+    source: migrated_records
+    destination: trusted_records
+    match_fields:
+      - source: vendor_name
+        destination: vendor_name
+        method: fuzzy
+        threshold: 60
+        tiers: [clean]
+
+output:
+  format: xlsx
+  path: output/sample_parts_results.xlsx
+  match_mode: best_match
+  tabs:
+    - name: Matched
+      type: matched_records
+    - name: Unmatched
+      type: unmatched_review
+  columns:
+    matched:
+      - field: vendor_id
+        header: Migrated ID
+      - field: vendor_name
+        header: Migrated Name
+      - field: part_type
+        header: Part Type
+      - field: brand
+        header: Brand
+      - field: match_step
+        header: Match Step
+      - field: match_tier
+        header: Match Tier
+      - field: name_score
+        header: Name Score

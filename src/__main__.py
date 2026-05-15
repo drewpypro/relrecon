@@ -280,7 +280,11 @@ def main() -> int:
         # Enhanced dry-run: load data, build populations, validate fields
         sources = {}
         for name, cfg in recipe["sources"].items():
-            sources[name] = load_source(cfg, str(data_dir))
+            sources[name] = load_source(
+                cfg, str(data_dir),
+                recipe_name=recipe.get("name", ""),
+                source_name=name,
+            )
 
         # Pre-validate filter fields before building populations
         filter_errors = []

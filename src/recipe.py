@@ -141,8 +141,8 @@ def validate_recipe(recipe: dict) -> list[str]:
         critical.append(f"Recipe missing required fields: {missing}")
 
     for name, src in recipe.get("sources", {}).items():
-        if "file" not in src:
-            critical.append(f"Source '{name}' missing 'file' field")
+        if "file" not in src and "loader" not in src:
+            critical.append(f"Source '{name}' missing 'file' or 'loader' field")
 
     step_names_seen: dict[str, int] = {}
     for i, step in enumerate(recipe.get("steps", [])):
@@ -196,19 +196,13 @@ def validate_recipe(recipe: dict) -> list[str]:
     return warnings
 
 
-def load_source(source_config: dict, base_dir: str = ".") -> pl.DataFrame:
-    """Load a data source. Auto-detects CSV/Parquet from extension."""
-    file_path = Path(base_dir) / source_config["file"]
-    if not file_path.exists():
-        raise FileNotFoundError(f"Data file not found: {file_path}")
-
-    suffix = file_path.suffix.lower()
-    if suffix == ".parquet":
-        return pl.read_parquet(str(file_path))
-    elif suffix in (".csv", ".tsv"):
-        return pl.read_csv(str(file_path), infer_schema_length=0)
-    else:
-        raise ValueError(f"Unsupported format: {suffix}")
+def load_source(source_config: dict, base_dir: str = ".",
+                recipe_name: str = "", source_name: str = "") -> pl.DataFrame:
+    from loaders import dispatch_loader
+    return dispatch_loader(
+        source_config, base_dir,
+        recipe_name=recipe_name, source_name=source_name,
+    )
 
 
 def build_filter_expr(filter_config: list, join_mode: str = "and") -> pl.Expr:
@@ -464,7 +458,8 @@ def format_validation_summary(
     lines.append("Sources:")
     for name, df in sources.items():
         src_cfg = recipe["sources"][name]
-        lines.append(f"  {name}: {src_cfg['file']} ({df.height} rows, {df.width} cols)")
+        src_label = src_cfg.get('file', f"{src_cfg.get('driver', 'sql')} query")
+        lines.append(f"  {name}: {src_label} ({df.height} rows, {df.width} cols)")
     lines.append("")
 
     lines.append("Populations:")
