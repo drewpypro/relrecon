@@ -567,7 +567,11 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
     t = _time.time()
     sources = {}
     for name, cfg in recipe["sources"].items():
-        sources[name] = load_source(cfg, base_dir)
+        sources[name] = load_source(
+            cfg, base_dir,
+            recipe_name=recipe.get("name", ""),
+            source_name=name,
+        )
 
     # Pre-validate filter fields before building populations
     filter_errors = []
