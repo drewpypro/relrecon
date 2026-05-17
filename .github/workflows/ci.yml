@@ -1,9 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches-ignore: [main]
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 
 permissions:
@@ -82,7 +82,10 @@ jobs:
         run: bandit -r src/ -q --skip B101,B112 --severity-level medium
 
       - name: Semgrep gate
-        run: semgrep scan --config auto --metrics=off --error .
+        env:
+          SEMGREP_SEND_METRICS: "off"
+          SEMGREP_ENABLE_VERSION_CHECK: "false"
+        run: semgrep scan --config p/default --error --verbose .
 
   dep-scan:
     name: Dependency and filesystem scan
