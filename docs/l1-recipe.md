@@ -277,3 +277,4 @@ The `step_defaults` feature reduces recipe verbosity by defining `address_suppor
 ### Address Field Selection
 
 The test dataset has three address fields: `hq_addr1` (street), `hq_addr2` (city/state/zip), and `hq_addr3` (country). Using 2-field matching (addr1 + addr2) vs 3-field (addr1 + addr2 + addr3) produces different address scores but matches the same records. The 3-field approach was removed because `hq_addr3` is primarily country codes, which adds noise to address scoring without improving match accuracy.
+ 

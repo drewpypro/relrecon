@@ -196,3 +196,4 @@ See `config/recipes/gleif_parent_lookup.yaml` for a complete 3-phase pipeline:
 The test variant (`gleif_parent_lookup_test.yaml`) runs against small test data and outputs Phase 3 only (CSV + md + xlsx report). The example variant (`gleif_phased_output_example.yaml`) demonstrates mixed output modes across all three phases.
 
 See `docs/gleif_parent_matching_design_note.md` for the domain logic behind this pipeline.
+ 
