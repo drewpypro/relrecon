@@ -517,7 +517,11 @@ def format_validation_summary(
     lines.append("")
 
     lines.append("Field validation:")
-    for i, step in enumerate(recipe["steps"]):
+    all_steps = recipe.get("steps", [])
+    if not all_steps and "phases" in recipe:
+        for phase in recipe["phases"]:
+            all_steps.extend(phase.get("steps", []))
+    for i, step in enumerate(all_steps):
         step_label = f'Step {i+1} "{step.get("name", "?")}"'
         lines.append(f"  {step_label}:")
 

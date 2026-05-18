@@ -291,9 +291,15 @@ def main() -> int:
                 source_name=name,
             )
 
+        # Collect all populations (top-level or from phases)
+        all_populations = recipe.get("populations", {})
+        if not all_populations and "phases" in recipe:
+            for phase in recipe["phases"]:
+                all_populations.update(phase.get("populations", {}))
+
         # Pre-validate filter fields before building populations
         filter_errors = []
-        for pop_name, pop_cfg in recipe["populations"].items():
+        for pop_name, pop_cfg in all_populations.items():
             src_name = pop_cfg.get("source", "")
             if src_name not in sources:
                 continue
@@ -312,8 +318,10 @@ def main() -> int:
             return 1
 
         populations = {}
-        for pop_name, pop_cfg in recipe["populations"].items():
+        for pop_name, pop_cfg in all_populations.items():
             src_name = pop_cfg["source"]
+            if src_name.startswith("_"):
+                continue
             src_df = sources[src_name]
             if "filter" in pop_cfg and pop_cfg["filter"]:
                 filtered = filter_population(src_df, pop_cfg)
@@ -333,7 +341,7 @@ def main() -> int:
                 other_cfg = other_data["config"]
                 if "filter" in other_cfg and other_cfg["filter"]:
                     remainder = remainder.filter(~build_filter_expr(other_cfg["filter"]))
-            for garb_name, garb_cfg in recipe["populations"].items():
+            for garb_name, garb_cfg in all_populations.items():
                 if garb_name == pop_name:
                     continue
                 if garb_cfg.get("action") == "exclude" and "filter" in garb_cfg and garb_cfg["filter"]:
