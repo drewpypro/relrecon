@@ -86,6 +86,8 @@ If `zip_entry` is omitted: uses the single file if there's only one, otherwise p
 
 Either `url` or `url_from` must be provided.
 
+**Cache key note:** The cache is keyed by URL, `url_from`, `columns` and other source config fields. Two recipes that pull from the same URL but request different `columns` will each download and cache separately. For large sources like GLEIF (~300MB), this means the first run of each recipe triggers its own download. After that, `cache_ttl` applies and subsequent runs use the cached file.
+
 ### Custom headers / auth
 
 ```yaml
