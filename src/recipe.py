@@ -127,7 +127,7 @@ def validate_recipe(recipe: dict) -> list[str]:
             errors = sorted(validator.iter_errors(recipe), key=lambda e: list(e.path))
             schema_errors = []
             for err in errors:
-                path = err.json_path or "$"
+                path = getattr(err, "json_path", None) or "$"
                 # additionalProperties violations are warnings (typos, indent bugs)
                 if err.validator == "additionalProperties":
                     warnings.append(f"{path}: {err.message}")

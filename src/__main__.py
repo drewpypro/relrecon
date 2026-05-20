@@ -199,6 +199,7 @@ def _write_phase_output(
     recipe_file: str,
     timestamp: str,
     mermaid_mode: str = "default",
+    phase_unmatched_df=None,
 ):
     """Write output files for a single phase in a multi-phase pipeline."""
     from recipe import resolve_summary_modes
@@ -268,7 +269,7 @@ def _write_phase_output(
         try:
             report_path = base_path + "_report.xlsx"
             generate_report(
-                phase_df, None, report_path,
+                phase_df, phase_unmatched_df, report_path,
                 stats=p_stats, recipe=mini_recipe, recipe_file=recipe_file,
             )
             print(f"Phase {phase_idx + 1} report: {report_path}")
@@ -542,6 +543,7 @@ def main() -> int:
     if is_multi_phase:
         # Multi-phase: per-phase output (ADR-003)
         phase_snapshots = result.get("phase_snapshots", [])
+        phase_unmatched = result.get("phase_unmatched", [])
         phase_stats_list = result.get("phases", [])
 
         for phase_idx, phase_cfg in enumerate(recipe["phases"]):
@@ -553,10 +555,12 @@ def main() -> int:
                 print(f"Phase {phase_idx + 1}: skipped (empty)")
                 continue
 
+            p_unmatched = phase_unmatched[phase_idx] if phase_idx < len(phase_unmatched) else None
             _write_phase_output(
                 phase_cfg=phase_cfg,
                 phase_idx=phase_idx,
                 phase_df=phase_df,
+                phase_unmatched_df=p_unmatched,
                 phase_stats=phase_stats_list[phase_idx] if phase_idx < len(phase_stats_list) else {},
                 overall_stats=stats,
                 recipe=recipe,

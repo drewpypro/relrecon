@@ -402,6 +402,16 @@ def load_http(source_config: dict, base_dir: str = ".",
     if not url and not url_from:
         raise ValueError("HTTP loader requires a 'url' or 'url_from' field")
 
+    # Check cache before resolving url_from (avoids HTTP request on every run)
+    cache_config = dict(config)
+    cached = _read_cache(cache_config, base_dir, recipe_name, source_name)
+    if cached is not None:
+        columns = config.get("columns")
+        if columns:
+            cached = cached.select(columns)
+        return cached
+
+    # Only resolve url_from on cache miss
     if url_from and not url:
         verify = config.get("verify", True)
         timeout = float(config.get("timeout", 300))
@@ -413,16 +423,10 @@ def load_http(source_config: dict, base_dir: str = ".",
         url = _resolve_url_from(url_from, verify, timeout)
         config["url"] = url
 
-    cached = _read_cache(config, base_dir, recipe_name, source_name)
-    if cached is not None:
-        columns = config.get("columns")
-        if columns:
-            cached = cached.select(columns)
-        return cached
-
     df = _fetch_and_parse(config, base_dir)
 
-    _write_cache(df, config, base_dir, recipe_name, source_name)
+    # Write cache using pre-mutation config so the key matches reads
+    _write_cache(df, cache_config, base_dir, recipe_name, source_name)
 
     columns = config.get("columns")
     if columns:
