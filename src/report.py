@@ -228,6 +228,13 @@ def _build_columns_from_recipe(recipe_columns: list, df: pl.DataFrame) -> list:
         elif "field" in entry:
             if entry["field"] in available:
                 resolved.append((entry["field"], header))
+            else:
+                import sys
+                print(
+                    f'[WARN] Report column "{entry["field"]}" (header: "{header}") '
+                    f"not found in data -- skipped",
+                    file=sys.stderr,
+                )
 
     return resolved
 
@@ -400,6 +407,14 @@ def apply_column_mapping(df, output_cfg: dict):
             select_cols.append(field)
             if header and header != field:
                 rename_map[field] = header
+        elif field and field not in df.columns and not fields:
+            import sys
+            print(
+                f'[WARN] Output column "{field}" (header: "{header}") '
+                f"not found in matched data -- skipped. "
+                f"Available: {', '.join(sorted(df.columns)[:15])}",
+                file=sys.stderr,
+            )
         elif fields:
             # Coalesce: first non-null field wins
             for f in fields:

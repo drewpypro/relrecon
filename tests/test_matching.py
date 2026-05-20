@@ -501,7 +501,7 @@ def test_address_scoring_receives_aliases():
     # With aliases, normalized tier should see "boulevard" on both sides
     matched_with = run_matching_step(
         source_df, dest_df, step_config,
-        aliases=aliases, dedup_field="record_key",
+        norm={"addr_aliases": aliases}, dedup_field="record_key",
     )
     # Without aliases, normalized tier treats "blvd" != "boulevard"
     matched_without = run_matching_step(
@@ -591,9 +591,9 @@ def test_address_tiers_from_recipe():
     aliases = {"blvd": "boulevard"}
 
     m_raw = run_matching_step(source_df, dest_df, step_raw_only,
-                              aliases=aliases, dedup_field="record_key")
+                              norm={"addr_aliases": aliases}, dedup_field="record_key")
     m_all = run_matching_step(source_df, dest_df, step_all,
-                              aliases=aliases, dedup_field="record_key")
+                              norm={"addr_aliases": aliases}, dedup_field="record_key")
 
     assert m_raw.height == 1
     assert m_all.height == 1
@@ -798,6 +798,130 @@ def test_street_weight_default_when_omitted():
     m2 = run_matching_step(src, dst, step_explicit_default, dedup_field="record_key")
 
     assert m1["addr_score"][0] == m2["addr_score"][0]
+
+
+def test_normalization_scoping():
+    """Name stopwords/aliases should not cross-contaminate address scoring and vice versa."""
+    # Source with name that contains address-alias-triggering tokens
+    source_df = pl.DataFrame({
+        "record_key": ["1", "2"],
+        "name": ["DR Horton Inc", "CT Corporation"],
+        "addr1": ["123 Main Blvd", "456 Oak Ave"],
+        "addr2": ["", ""],
+    })
+    dest_df = pl.DataFrame({
+        "record_key": ["A", "B"],
+        "name": ["DR Horton", "CT"],
+        "addr1": ["123 Main Boulevard", "456 Oak Avenue"],
+        "addr2": ["", ""],
+    })
+
+    step_config = {
+        "name": "Test scoping",
+        "source": "pop1",
+        "destination": "pop2",
+        "match_fields": [{
+            "source": "name",
+            "destination": "name",
+            "method": "exact",
+            "tiers": ["raw", "clean", "normalized"],
+        }],
+        "address_support": {
+            "source": ["addr1", "addr2"],
+            "destination": ["addr1", "addr2"],
+            "parser": "default",
+            "tiers": ["raw", "clean", "normalized"],
+        },
+    }
+
+    # Address aliases (blvd->boulevard, etc.) and name stopwords (inc, corporation)
+    addr_aliases = {"blvd": "boulevard", "ave": "avenue", "dr": "drive"}
+    name_sw = ["inc", "corporation"]
+    addr_sw = ["suite", "floor"]
+
+    norm = {
+        "name_aliases": None,
+        "name_stopwords": name_sw,
+        "addr_aliases": addr_aliases,
+        "addr_stopwords": addr_sw,
+    }
+
+    matched = run_matching_step(
+        source_df, dest_df, step_config,
+        norm=norm, dedup_field="record_key",
+    )
+
+    results = []
+    # Both should match: normalized tier strips "Inc"/"Corporation" from names
+    results.append({
+        "check": "both_matched",
+        "passed": matched.height == 2,
+        "actual": matched.height,
+    })
+
+    if matched.height > 0:
+        # Address aliases should work (blvd->boulevard) in addr scoring
+        scores = matched["addr_score"].to_list()
+        results.append({
+            "check": "addr_aliases_work",
+            "passed": all(s > 80 for s in scores),
+            "actual": scores,
+        })
+
+    for r in results:
+        assert r["passed"], f"Failed: {r}"
+    return results
+
+
+def test_step_exclusion():
+    """Step-level exclude should skip specific records."""
+    source_df = pl.DataFrame({
+        "record_key": ["1", "2", "3"],
+        "name": ["Alpha Corp", "Beta Inc", "Gamma LLC"],
+    })
+    dest_df = pl.DataFrame({
+        "record_key": ["A", "B", "C"],
+        "name": ["Alpha Corp", "Beta Inc", "Gamma LLC"],
+    })
+
+    step_with_exclude = {
+        "name": "Test exclude",
+        "source": "pop1",
+        "destination": "pop2",
+        "match_fields": [{
+            "source": "name",
+            "destination": "name",
+            "method": "exact",
+            "tiers": ["raw"],
+        }],
+        "exclude": {
+            "field": "record_key",
+            "values": ["2"],
+        },
+    }
+
+    matched, _ = run_matching_step(
+        source_df, dest_df, step_with_exclude,
+        dedup_field="record_key", collect_rejections=True,
+    )
+
+    results = []
+    results.append({
+        "check": "excluded_record_absent",
+        "passed": matched.height == 2,
+        "actual": matched.height,
+    })
+    if matched.height > 0:
+        keys = matched["record_key"].to_list()
+        results.append({
+            "check": "correct_keys",
+            "passed": "2" not in keys and "1" in keys and "3" in keys,
+            "actual": keys,
+        })
+
+    for r in results:
+        assert r["passed"], f"Failed: {r}"
+    return results
 
 
 def run_all():

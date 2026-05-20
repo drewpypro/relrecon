@@ -484,12 +484,48 @@ def _apply_step_filter(df: pl.DataFrame, filt: dict) -> pl.DataFrame:
 
 def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
                       step_config: dict,
-                      aliases: dict = None, stopwords: list = None,
+                      norm: dict = None,
                       dedup_field: str = None,
                       collect_rejections: bool = False) -> pl.DataFrame | tuple:
     """Execute one matching step. Returns (matched_df, rejections) when collect_rejections=True."""
+    if norm is None:
+        norm = {}
+    name_aliases = norm.get("name_aliases")
+    name_stopwords = norm.get("name_stopwords")
+    addr_aliases = norm.get("addr_aliases")
+    addr_stopwords = norm.get("addr_stopwords")
 
     step_config = _normalize_step_filters(step_config)
+
+    # Step exclusion: skip specific records so they fall through to later steps
+    exclude_cfg = step_config.get("exclude")
+    if exclude_cfg:
+        exc_field = exclude_cfg.get("field", dedup_field)
+        exc_values = list(exclude_cfg.get("values", []))
+        exc_file = exclude_cfg.get("file")
+        if exc_file:
+            import csv
+            exc_path = Path(exc_file)
+            if exc_path.exists():
+                with open(exc_path) as f:
+                    reader = csv.reader(f)
+                    for row in reader:
+                        if row:
+                            exc_values.append(row[0].strip())
+        if exc_field and exc_values and exc_field in source_df.columns:
+            exc_set = set(str(v) for v in exc_values)
+            pre_count = source_df.height
+            source_df = source_df.filter(
+                ~pl.col(exc_field).cast(pl.String).is_in(exc_set)
+            )
+            excluded_count = pre_count - source_df.height
+            if excluded_count > 0:
+                import sys
+                print(
+                    f'    [exclude] Skipped {excluded_count} records '
+                    f'(field={exc_field}, values={len(exc_set)})',
+                    file=sys.stderr,
+                )
 
     for filt in step_config.get("filters", []):
         applies_to = filt.get("applies_to", "destination")
@@ -517,8 +553,8 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             mf.get("tiers", ["raw", "clean"]),
             threshold=mf.get("threshold", 80),
             scorer=mf.get("scorer", "token_sort_ratio"),
-            aliases=aliases,
-            stopwords=stopwords,
+            aliases=name_aliases,
+            stopwords=name_stopwords,
             dedup_field=dedup_field,
             exclude_self_key=_self_key,
         )
@@ -527,8 +563,8 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
             source_df, dest_df,
             mf["source"], mf["destination"],
             mf.get("tiers", ["raw", "clean"]),
-            aliases=aliases,
-            stopwords=stopwords,
+            aliases=name_aliases,
+            stopwords=name_stopwords,
             dedup_field=dedup_field,
             exclude_self_key=_self_key,
         )
@@ -552,8 +588,8 @@ def run_matching_step(source_df: pl.DataFrame, dest_df: pl.DataFrame,
         matched = score_addresses_batch(
             matched, src_cols, dst_cols,
             parser=ac.get("parser", "auto"),
-            aliases=aliases,
-            stopwords=stopwords,
+            aliases=addr_aliases,
+            stopwords=addr_stopwords,
             tiers=ac.get("tiers"),
             street_weight=ac.get("weights", {}).get("street_name", 0.6),
         )
@@ -660,7 +696,7 @@ def _build_populations(recipe_pops: dict, sources: dict) -> dict:
 
 
 def _run_phase_steps(steps, populations, sources,
-                     aliases=None, stopwords=None,
+                     norm=None,
                      track_field=None, tie_breaker=None,
                      step_offset=0):
     """Run matching steps for a single phase. Returns results dict."""
@@ -697,10 +733,11 @@ def _run_phase_steps(steps, populations, sources,
             if tb_col in dst_df.columns:
                 dst_df = _presort_by_tie_breaker(dst_df, tie_breaker, tb_col)
 
-        step_result = run_matching_step(src_df, dst_df, step,
-                                        aliases=aliases, stopwords=stopwords,
-                                        dedup_field=track_field,
-                                        collect_rejections=True)
+        step_result = run_matching_step(
+            src_df, dst_df, step,
+            norm=norm, dedup_field=track_field,
+            collect_rejections=True,
+        )
         matched, rejections = step_result
 
         if "street_mismatch" in rejections:
@@ -809,15 +846,24 @@ def _build_unmatched(pop1_df, matched_source_keys, track_field, all_rejections):
 
 
 def _load_normalization(norm_cfg, base_dir):
-    """Load aliases and stopwords from normalization config."""
-    aliases = None
-    stopwords = None
+    """Load aliases and stopwords, scoped by field type."""
+    addr_aliases = None
+    name_aliases = None
+    name_stopwords = None
+    addr_stopwords = None
+
     if norm_cfg.get("aliases"):
         aliases_path = Path(norm_cfg["aliases"])
         if not aliases_path.exists():
             aliases_path = Path(base_dir) / norm_cfg["aliases"]
         if aliases_path.exists():
-            aliases = json.loads(aliases_path.read_text())
+            raw = json.loads(aliases_path.read_text())
+            if isinstance(raw, dict) and ("name" in raw or "address" in raw):
+                name_aliases = raw.get("name")
+                addr_aliases = raw.get("address", raw)
+            else:
+                addr_aliases = raw
+
     if norm_cfg.get("stopwords"):
         sw_path = Path(norm_cfg["stopwords"])
         if not sw_path.exists():
@@ -825,10 +871,19 @@ def _load_normalization(norm_cfg, base_dir):
         if sw_path.exists():
             sw_data = json.loads(sw_path.read_text())
             if isinstance(sw_data, dict):
-                stopwords = [w for words in sw_data.values() for w in words]
+                name_stopwords = sw_data.get("name", [])
+                addr_stopwords = sw_data.get("address", [])
+                # Any keys besides "name" and "address" go to both
+                for key, words in sw_data.items():
+                    if key not in ("name", "address"):
+                        name_stopwords = (name_stopwords or []) + words
+                        addr_stopwords = (addr_stopwords or []) + words
             else:
-                stopwords = sw_data
-    return aliases, stopwords
+                # Flat list -- apply to both (backward compatible)
+                name_stopwords = sw_data
+                addr_stopwords = sw_data
+
+    return name_aliases, name_stopwords, addr_aliases, addr_stopwords
 
 
 def _resolve_track_field(steps, populations):
@@ -905,16 +960,22 @@ def run_pipeline(recipe: dict, base_dir: str = ".") -> dict:
     print("Running matching pipeline...", flush=True)
 
     norm_cfg = recipe.get("normalization", {})
-    aliases, stopwords = _load_normalization(norm_cfg, base_dir)
+    name_aliases, name_stopwords, addr_aliases, addr_stopwords = _load_normalization(norm_cfg, base_dir)
+    norm = {
+        "name_aliases": name_aliases,
+        "name_stopwords": name_stopwords,
+        "addr_aliases": addr_aliases,
+        "addr_stopwords": addr_stopwords,
+    }
     timings["load"] = _time.time() - t
 
     if "phases" in recipe:
-        return _run_multi_phase(recipe, sources, aliases, stopwords, timings)
+        return _run_multi_phase(recipe, sources, norm, timings)
     else:
-        return _run_single_phase(recipe, sources, aliases, stopwords, timings)
+        return _run_single_phase(recipe, sources, norm, timings)
 
 
-def _run_single_phase(recipe, sources, aliases, stopwords, timings):
+def _run_single_phase(recipe, sources, norm, timings):
     """Run a classic single-phase pipeline (backward compatible)."""
     import time as _time
 
@@ -968,7 +1029,7 @@ def _run_single_phase(recipe, sources, aliases, stopwords, timings):
 
     phase_result = _run_phase_steps(
         recipe["steps"], populations, sources,
-        aliases=aliases, stopwords=stopwords,
+        norm=norm,
         track_field=track_field, tie_breaker=tie_breaker,
     )
     timings["match"] = _time.time() - t
@@ -999,7 +1060,7 @@ def _run_single_phase(recipe, sources, aliases, stopwords, timings):
     }
 
 
-def _run_multi_phase(recipe, sources, aliases, stopwords, timings):
+def _run_multi_phase(recipe, sources, norm, timings):
     """Run a multi-phase pipeline.
 
     Each phase has its own populations and steps. Phases execute
@@ -1014,6 +1075,7 @@ def _run_multi_phase(recipe, sources, aliases, stopwords, timings):
     phases = recipe["phases"]
     phase_stats = []
     phase_snapshots = []  # per-phase matched DataFrames for phase-level output
+    phase_unmatched_list = []  # per-phase unmatched for phase-level output
     previous_matched = None
     step_offset = 0
     total_match_time = 0
@@ -1096,7 +1158,7 @@ def _run_multi_phase(recipe, sources, aliases, stopwords, timings):
 
         phase_result = _run_phase_steps(
             phase_steps, populations, sources,
-            aliases=aliases, stopwords=stopwords,
+            norm=norm,
             track_field=track_field, tie_breaker=tie_breaker,
             step_offset=step_offset,
         )
@@ -1143,6 +1205,15 @@ def _run_multi_phase(recipe, sources, aliases, stopwords, timings):
 
         cumulative_rejections.update(phase_result["all_rejections"])
         phase_snapshots.append(phase_matched.clone())
+
+        # Build per-phase unmatched for phase-level output
+        phase_pop1_df = populations.get(pop1_name, {}).get("df", pl.DataFrame())
+        phase_unmatched = _build_unmatched(
+            phase_pop1_df, phase_result["matched_source_keys"],
+            track_field, phase_result["all_rejections"]
+        )
+        phase_unmatched_list.append(phase_unmatched)
+
         previous_matched = phase_matched
         step_offset += len(phase_steps)
 
@@ -1202,4 +1273,5 @@ def _run_multi_phase(recipe, sources, aliases, stopwords, timings):
         "timing": timings,
         "phases": phase_stats,
         "phase_snapshots": phase_snapshots,
+        "phase_unmatched": phase_unmatched_list,
     }

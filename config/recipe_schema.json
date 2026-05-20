@@ -493,6 +493,28 @@
               }
             },
             "description": "Columns to inherit from the destination record on match"
+          },
+          "exclude": {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "description": "Field to match exclude values against (defaults to record_key)"
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Exact values to exclude from this step"
+              },
+              "file": {
+                "type": "string",
+                "description": "CSV file with values to exclude (first column)"
+              }
+            },
+            "additionalProperties": false,
+            "description": "Skip specific source records from this step so they fall through to later steps"
           }
         }
       }

@@ -253,13 +253,7 @@ def clean(value: str) -> str:
 
 def normalized(value: str, aliases: Optional[dict | list] = None,
                stopwords: Optional[set | list] = None) -> str:
-    """Normalized tier: clean + alias replacement + stopword removal.
-
-    Used for addresses only, never for names.
-    Accepts aliases as a dict (compiled on the fly) or a pre-compiled list
-    from compile_aliases() for performance at scale.
-    Accepts stopwords as a list or pre-built set/frozenset.
-    """
+    """Normalized tier: clean + alias replacement + stopword removal."""
     s = clean(value)
 
     if aliases:
